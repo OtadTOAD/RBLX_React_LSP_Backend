@@ -1,32 +1,25 @@
-use tower_lsp::{
-    lsp_types::{
-        InitializeParams, InitializeResult, InitializedParams, ServerCapabilities,
-        TextDocumentSyncCapability, TextDocumentSyncKind,
-    },
-    LspService, Server,
-};
-type LspResult<T> = std::result::Result<T, tower_lsp::jsonrpc::Error>;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-struct Backend;
+#[derive(Debug)]
+struct Backend {
+    client: Client,
+}
+
 #[tower_lsp::async_trait]
-impl tower_lsp::LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> LspResult<InitializeResult> {
-        print!("Init LSP Server...");
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
-                )),
-                ..Default::default()
-            },
-            server_info: None,
-        })
+impl LanguageServer for Backend {
+    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        Ok(InitializeResult::default())
     }
-    async fn initialized(&self, _params: InitializedParams) {
-        println!("Server inited!");
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "server initialized!")
+            .await;
     }
-    async fn shutdown(&self) -> LspResult<()> {
-        println!("Shutting down LSP Server...");
+
+    async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -36,7 +29,6 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|_client| Backend).finish();
-    println!("Starting LSP Server...");
+    let (service, socket) = LspService::new(|client| Backend { client });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
