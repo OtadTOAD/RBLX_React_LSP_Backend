@@ -1,5 +1,6 @@
 mod api_manager;
 mod api_parser;
+mod file_diagnoser;
 mod file_manager;
 
 use std::sync::Arc;
@@ -8,20 +9,23 @@ use tokio::sync::Mutex;
 use tower_lsp::{
     jsonrpc::Result,
     lsp_types::{
-        CompletionOptions, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-        DidOpenTextDocumentParams, ExecuteCommandOptions, InitializeParams, InitializeResult,
-        InitializedParams, MessageType, ServerCapabilities, TextDocumentSyncCapability,
-        TextDocumentSyncKind,
+        CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+        DidCloseTextDocumentParams, DidOpenTextDocumentParams, ExecuteCommandOptions,
+        ExecuteCommandParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
+        ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
     },
     Client, LanguageServer, LspService, Server,
 };
 
-use crate::file_manager::FileManager;
+use crate::{
+    api_manager::ApiManager, file_diagnoser::generate_auto_completions, file_manager::FileManager,
+};
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
     file_manager: Arc<Mutex<FileManager>>,
+    api_manager: Arc<Mutex<ApiManager>>,
 }
 
 #[tower_lsp::async_trait]
@@ -48,14 +52,21 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let mut api_manager = self.api_manager.lock().await;
+
+        let _ = api_manager
+            .load_api()
+            .await
+            .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+
         self.client
-            .log_message(MessageType::INFO, "server initialized!")
+            .log_message(MessageType::INFO, "Server initialized!")
             .await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let mut mutex_fm = self.file_manager.lock().await;
-        mutex_fm.on_opened_file(
+        let mut file_manager = self.file_manager.lock().await;
+        file_manager.on_opened_file(
             params.text_document.uri,
             params.text_document.text,
             params.text_document.version,
@@ -63,8 +74,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let mut mutex_fm = self.file_manager.lock().await;
-        mutex_fm.on_changed_file(
+        let mut file_manager = self.file_manager.lock().await;
+        file_manager.on_changed_file(
             &params.text_document.uri,
             &params.content_changes,
             params.text_document.version,
@@ -74,6 +85,38 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let mut mutex_fm = self.file_manager.lock().await;
         mutex_fm.on_closed_file(&params.text_document.uri);
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let file_manager = self.file_manager.lock().await;
+        let api_manager = self.api_manager.lock().await;
+        let text_document = params.text_document_position;
+
+        let file_text = file_manager.get_text(&text_document.text_document.uri);
+        if file_text.is_some() {
+            if let Ok(diagnose_results) =
+                generate_auto_completions(file_text.unwrap(), &text_document.position, &api_manager)
+            {
+                return Ok(Some(diagnose_results));
+            }
+        }
+
+        Ok(Some(CompletionResponse::Array(vec![])))
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command == "rblx-react-lsp.genMetadata" {
+            let mut api_manager = self.api_manager.lock().await;
+            let _ = api_manager
+                .download_api()
+                .await
+                .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+        }
+
+        Ok(None)
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -89,6 +132,7 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         file_manager: Arc::new(Mutex::new(FileManager::new())),
+        api_manager: Arc::new(Mutex::new(ApiManager::new())),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }

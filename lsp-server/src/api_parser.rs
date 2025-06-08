@@ -76,9 +76,9 @@ impl Default for ValueType {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ParsedInstance {
-    instance: String,
-    superclass: String,
-    properties: Vec<ParsedProperty>,
+    pub instance: String,
+    pub superclass: String,
+    pub properties: Vec<ParsedProperty>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -1,25 +1,44 @@
-use crate::api_parser::{get_cache, ParsedInstance};
+use crate::api_parser::{cache_file, download_api, get_cache, parse_api_dump, ParsedInstance};
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct ApiManager {
-    instances: HashMap<String, ParsedInstance>,
+    instances: Option<HashMap<String, ParsedInstance>>,
 }
 
 impl ApiManager {
-    fn new(parsed_instances: HashMap<String, ParsedInstance>) -> Self {
-        Self {
-            instances: parsed_instances,
+    pub fn new() -> Self {
+        Self { instances: None }
+    }
+
+    // This downloads and caches new api file, which then gets loaded
+    pub async fn download_api(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let download_result = download_api().await?;
+        let parsed_instances = parse_api_dump(&download_result);
+
+        cache_file(&parsed_instances)?;
+        self.instances = Some(parsed_instances);
+
+        Ok(())
+    }
+
+    // This loads api from cached file
+    pub async fn load_api(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let cache_result = get_cache()?;
+        if cache_result.is_none() {
+            return Err("Failed to load api from cache!".into());
         }
+
+        self.instances = cache_result;
+
+        Ok(())
     }
 
-    fn lookup_inst(&self, name: &str) -> Option<&ParsedInstance> {
-        self.instances.get(name)
-    }
-}
+    pub fn lookup_inst(&self, name: &str) -> Option<&ParsedInstance> {
+        if self.instances.is_none() {
+            return None;
+        }
 
-pub fn init_api_manager() -> Result<ApiManager, Box<dyn std::error::Error>> {
-    let api_cache = get_cache()?;
-    let parsed_instances = api_cache
-        .ok_or_else(|| -> Box<dyn std::error::Error> { "Failed to find api_dump.json!".into() })?;
-    Ok(ApiManager::new(parsed_instances))
+        self.instances.as_ref()?.get(name)
+    }
 }
