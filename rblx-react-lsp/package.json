@@ -10,11 +10,29 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "onLanguage:lua",
+    "workspaceContains:/*.project.json"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": []
+    "commands": [
+      {
+        "title": "Generate metadata",
+        "command": "rblx-react-lsp.genMetadata"
+      }
+    ],
+    "languages": [
+      {
+        "id": "lua",
+        "aliases": [
+          "Luau"
+        ],
+        "extensions": [
+          ".lua",
+          ".luau"
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
