@@ -28,8 +28,18 @@ fn get_react_var_name(doc: &str) -> Option<String> {
 }
 
 fn extract_name_from_span(span: &str) -> Option<String> {
-    if let Some(caps) = FIRST_QUOTES_PATTERN.captures(span) {
-        return Some(caps.get(1).unwrap().as_str().to_string());
+    let args: Vec<&str> = span.split(',').collect();
+    if let Some(first_arg) = args.get(0) {
+        let trimmed = first_arg.trim();
+        if trimmed.len() >= 2 {
+            let first_char = trimmed.chars().next();
+            let last_char = trimmed.chars().rev().next();
+            if (first_char == Some('"') || first_char == Some('\'') || first_char == Some('`'))
+                && first_char == last_char
+            {
+                return Some(trimmed[1..trimmed.len() - 1].to_string());
+            }
+        }
     }
     None
 }
@@ -103,4 +113,60 @@ pub fn generate_auto_completions(
         cursor,
         api_manager,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::file_diagnoser::{extract_name_from_span, get_react_var_name};
+
+    #[test]
+    fn test_react_variable_name_search() {
+        assert_eq!(
+            get_react_var_name(r#"local Test = require(Somewhere.Somehow.Sometime.React);"#),
+            Some("Test".to_string())
+        );
+        assert_eq!(
+            get_react_var_name(r#"local Test = require(Somewhere.Somehow.Sometime.React)"#),
+            Some("Test".to_string())
+        );
+        assert_eq!(
+            get_react_var_name(r#"local _Best123 = require(Somewhere.Somehow.Sometime.React);"#),
+            Some("_Best123".to_string())
+        );
+        assert_eq!(
+            get_react_var_name(r#"local P = require(Test.React)"#),
+            Some("P".to_string())
+        );
+    }
+
+    #[test]
+    fn test_instance_names() {
+        assert_eq!(
+            extract_name_from_span(r#"'Frame', { ... }"#),
+            Some("Frame".to_string())
+        );
+        assert_eq!(
+            extract_name_from_span(r#"`TextLabel`,\n { ["Test"] = "Huh", ... }"#),
+            Some("TextLabel".to_string())
+        );
+        assert_eq!(
+            extract_name_from_span(
+                r#""UIPadding",
+            {
+                Text = "Wrong Answer"
+            }"#
+            ),
+            Some("UIPadding".to_string())
+        );
+        assert_eq!(extract_name_from_span(r#"[Frame], { ... }"#), None);
+        assert_eq!(
+            extract_name_from_span(
+                r#"{
+            ["Test"] = "Wrong",
+        }"#
+            ),
+            None
+        );
+        assert_eq!(extract_name_from_span(r#"{"Wrong"}"#), None);
+    }
 }
