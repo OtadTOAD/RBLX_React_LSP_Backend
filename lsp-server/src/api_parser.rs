@@ -2,13 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
+use std::{env, fs};
 
 type ParsedInstances = HashMap<String, ParsedInstance>;
-
-static API_CACHE_PATH: &str = "test_api_dump.json";
 
 #[derive(Deserialize, Debug)]
 pub struct ApiDump {
@@ -38,6 +36,8 @@ pub struct Member {
     pub member_type: String, // Member type (e.g., "Property")
     #[serde(default, rename = "Name")]
     pub name: String, // Member name (e.g., "Archivable")
+    #[serde(default, rename = "Tags")]
+    pub tags: Vec<String>,
     #[serde(default, rename = "ValueType")]
     pub value_type: ValueType, // Value type (e.g., {"Category": "Primitive", "Name": "bool"})
 }
@@ -87,9 +87,16 @@ pub struct ParsedProperty {
     pub data_type: String,
 }
 
+fn get_cache_file_path() -> PathBuf {
+    let exe_path = env::current_exe().expect("Failed to get current exe path!");
+    let exe_dir = exe_path.parent().expect("Failed to get exe dir!");
+    exe_dir.join("serialized_api_json.json")
+}
+
 pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>> {
-    if Path::new(API_CACHE_PATH).exists() {
-        let cache_content = fs::read_to_string(API_CACHE_PATH)?;
+    let api_cache_path = get_cache_file_path();
+    if api_cache_path.exists() {
+        let cache_content = fs::read_to_string(api_cache_path)?;
         let parsed_api: ParsedInstances = serde_json::from_str(&cache_content)?;
         Ok(Some(parsed_api))
     } else {
@@ -98,8 +105,10 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>
 }
 
 pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {
+    let api_cache_path = get_cache_file_path();
+
     let serialized = serde_json::to_string_pretty(parsed_instances)?;
-    let mut file = fs::File::create(API_CACHE_PATH)?;
+    let mut file = fs::File::create(api_cache_path)?;
     file.write_all(serialized.as_bytes())?;
     Ok(())
 }
@@ -140,7 +149,11 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
             let mut inst_members: Vec<&Member> = top
                 .members
                 .iter()
-                .filter(|member| member.member_type == "Property")
+                .filter(|member| {
+                    member.member_type == "Property"
+                        && !member.tags.contains(&"Deprecated".to_string())
+                        && !member.tags.contains(&"ReadOnly".to_string())
+                })
                 .collect();
             if let Some(parent_inst) = inst_cache.get(top.superclass.as_str()) {
                 inst_members.extend(parent_inst)

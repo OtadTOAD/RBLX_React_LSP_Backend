@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
-use lsp_positions::SpanCalculator;
 use regex::Regex;
-use tower_lsp::lsp_types::{CompletionItem, CompletionResponse, Position};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position};
 
 use crate::api_manager::ApiManager;
 
@@ -54,12 +53,55 @@ fn get_instance_property_diagnostics(
         for property in &parsed_instance.properties {
             diagnostics.push(CompletionItem {
                 label: property.name.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(property.data_type.clone()),
                 ..Default::default()
             });
         }
     }
 
     diagnostics
+}
+
+fn position_to_byte_offset(doc: &str, position: &Position) -> Option<usize> {
+    let mut byte_offset = 0;
+
+    for (line_index, line) in doc.split_inclusive('\n').enumerate() {
+        if line_index == position.line as usize {
+            let mut utf16_units = 0;
+
+            for (byte_index, ch) in line.char_indices() {
+                if utf16_units >= position.character as usize {
+                    return Some(byte_offset + byte_index);
+                }
+                utf16_units += ch.len_utf16();
+            }
+
+            return Some(byte_offset + line.len());
+        }
+
+        byte_offset += line.len();
+    }
+
+    None
+}
+
+fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
+    if cursor_byte_offset > doc.len() {
+        return false;
+    }
+
+    let bytes = doc.as_bytes();
+    for i in (0..cursor_byte_offset).rev() {
+        match bytes[i] {
+            b'=' => return true,
+            b'\n' => return false,
+            b',' => return false,
+            b';' => return false,
+            _ => continue,
+        }
+    }
+    false
 }
 
 fn get_completion_items(
@@ -76,9 +118,8 @@ fn get_completion_items(
         return diagnostics;
     }
 
-    let mut sc = SpanCalculator::new(doc);
-    let cursor_span = sc.for_line_and_column(cursor.line as usize, cursor.character as usize, 0);
-    let cursor_byte_offset = cursor_span.containing_line.start + cursor_span.column.utf8_offset;
+    let cursor_byte_offset =
+        position_to_byte_offset(doc, cursor).expect("Invalid position given for doc!");
 
     let create_element_pattern = format!(
         r#"(?s){}\.createElement\s*\((.*?)\)"#,
@@ -88,14 +129,26 @@ fn get_completion_items(
 
     for caps in rgx.captures_iter(doc) {
         if let Some(group) = caps.get(1) {
-            let byte_start = group.start();
-            let byte_end = group.end();
-            if cursor_byte_offset >= byte_start && cursor_byte_offset <= byte_end {
-                if let Some(instance_name) = extract_name_from_span(group.as_str()) {
-                    let diags = get_instance_property_diagnostics(&instance_name, api_manager);
-                    diagnostics.extend(diags);
+            let group_str = group.as_str();
+
+            let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
+            if let Some(brace_caps) = brace_re.captures(group_str) {
+                if let Some(props_group) = brace_caps.get(1) {
+                    let props_start = group.start() + props_group.start();
+                    let props_end = group.start() + props_group.end() + 1;
+
+                    if cursor_byte_offset >= props_start && cursor_byte_offset <= props_end {
+                        if !context_is_assignment(doc, cursor_byte_offset) {
+                            if let Some(instance_name) = extract_name_from_span(group_str) {
+                                let diags =
+                                    get_instance_property_diagnostics(&instance_name, api_manager);
+                                diagnostics.extend(diags);
+                            }
+                        }
+
+                        break;
+                    }
                 }
-                break;
             }
         }
     }

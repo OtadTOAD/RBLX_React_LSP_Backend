@@ -3,7 +3,7 @@ import path from 'path';
 import { LanguageClient, LanguageClientOptions, LogMessageParams, ServerOptions, TransportKind, MessageType } from 'vscode-languageclient/node';
 
 // Just for debuggin so I know changes got thru
-const ver = "V6";
+const ver = "V7";
 let client: LanguageClient;
 
 function messageTypeToString(type: MessageType): string {

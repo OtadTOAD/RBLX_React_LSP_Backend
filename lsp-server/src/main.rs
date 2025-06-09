@@ -41,7 +41,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(true),
+                    //resolve_provider: Some(true),
                     trigger_characters: None,
                     ..Default::default()
                 }),
@@ -88,6 +88,10 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.client
+            .log_message(MessageType::INFO, "Requested completion!")
+            .await;
+
         let file_manager = self.file_manager.lock().await;
         let api_manager = self.api_manager.lock().await;
         let text_document = params.text_document_position;
@@ -99,6 +103,10 @@ impl LanguageServer for Backend {
             {
                 return Ok(Some(diagnose_results));
             }
+        } else {
+            self.client
+                .log_message(MessageType::LOG, "Could not find file!")
+                .await;
         }
 
         Ok(Some(CompletionResponse::Array(vec![])))
