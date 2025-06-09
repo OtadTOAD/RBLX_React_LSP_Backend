@@ -30,6 +30,11 @@ fn extract_name_from_span(span: &str) -> Option<String> {
     let args: Vec<&str> = span.split(',').collect();
     if let Some(first_arg) = args.get(0) {
         let trimmed = first_arg.trim();
+
+        if trimmed.starts_with("[[") && trimmed.ends_with("]]") && trimmed.len() >= 4 {
+            return Some(trimmed[2..trimmed.len() - 2].to_string());
+        }
+
         if trimmed.len() >= 2 {
             let first_char = trimmed.chars().next();
             let last_char = trimmed.chars().rev().next();
@@ -55,6 +60,22 @@ fn get_instance_property_diagnostics(
                 label: property.name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(property.data_type.clone()),
+                ..Default::default()
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn get_instance_names(api_manager: &ApiManager) -> Vec<CompletionItem> {
+    let mut diagnostics: Vec<CompletionItem> = Vec::new();
+
+    if let Some(inst_names) = api_manager.get_all_inst() {
+        for property in &inst_names {
+            diagnostics.push(CompletionItem {
+                label: property.clone(),
+                kind: Some(CompletionItemKind::CLASS),
                 ..Default::default()
             });
         }
@@ -104,6 +125,22 @@ fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
     false
 }
 
+fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> bool {
+    if let Some(caps) = context.captures(region) {
+        for i in 1..caps.len() {
+            if let Some(group) = caps.get(i) {
+                let byte_start = group.start();
+                let byte_end = group.end();
+
+                if byte_cursor >= byte_start && byte_cursor <= byte_end {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn get_completion_items(
     doc: &str,
     cursor: &Position,
@@ -130,25 +167,28 @@ fn get_completion_items(
     for caps in rgx.captures_iter(doc) {
         if let Some(group) = caps.get(1) {
             let group_str = group.as_str();
+            let local_cursor_offset = cursor_byte_offset - group.start();
 
             let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
-            if let Some(brace_caps) = brace_re.captures(group_str) {
-                if let Some(props_group) = brace_caps.get(1) {
-                    let props_start = group.start() + props_group.start();
-                    let props_end = group.start() + props_group.end() + 1;
-
-                    if cursor_byte_offset >= props_start && cursor_byte_offset <= props_end {
-                        if !context_is_assignment(doc, cursor_byte_offset) {
-                            if let Some(instance_name) = extract_name_from_span(group_str) {
-                                let diags =
-                                    get_instance_property_diagnostics(&instance_name, api_manager);
-                                diagnostics.extend(diags);
-                            }
-                        }
-
-                        break;
+            if is_cursor_in_context(local_cursor_offset, group_str, &brace_re) {
+                if !context_is_assignment(doc, cursor_byte_offset) {
+                    if let Some(instance_name) = extract_name_from_span(group_str) {
+                        let diags = get_instance_property_diagnostics(&instance_name, api_manager);
+                        diagnostics.extend(diags);
                     }
                 }
+
+                break;
+            }
+
+            let quotes_re =
+                Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#)
+                    .unwrap();
+            if is_cursor_in_context(local_cursor_offset, group_str, &quotes_re) {
+                let diags = get_instance_names(api_manager);
+                diagnostics.extend(diags);
+
+                break;
             }
         }
     }

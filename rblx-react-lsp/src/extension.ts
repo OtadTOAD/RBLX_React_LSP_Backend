@@ -37,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 	const clientOpts: LanguageClientOptions = {
 		documentSelector: [{ scheme: 'file', language: 'lua' }, { scheme: 'file', language: 'plaintext' }],
+
 		synchronize: {
 			fileEvents: vscode.workspace.createFileSystemWatcher('**/.clientrc')
 		}

@@ -35,10 +35,12 @@ impl ApiManager {
     }
 
     pub fn lookup_inst(&self, name: &str) -> Option<&ParsedInstance> {
-        if self.instances.is_none() {
-            return None;
-        }
-
         self.instances.as_ref()?.get(name)
+    }
+
+    pub fn get_all_inst(&self) -> Option<Vec<String>> {
+        let map = self.instances.as_ref()?;
+        let instance_names = map.keys().cloned().collect();
+        Some(instance_names)
     }
 }

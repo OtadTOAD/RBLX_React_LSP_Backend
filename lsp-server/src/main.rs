@@ -42,7 +42,14 @@ impl LanguageServer for Backend {
                 }),
                 completion_provider: Some(CompletionOptions {
                     //resolve_provider: Some(true),
-                    trigger_characters: None,
+                    trigger_characters: Some(vec![
+                        "\"".to_string(),
+                        ".".to_string(),
+                        "{".to_string(),
+                        "`".to_string(),
+                        "'".to_string(),
+                        "[[".to_string(),
+                    ]),
                     ..Default::default()
                 }),
                 ..Default::default()
