@@ -68,10 +68,10 @@ fn get_instance_property_diagnostics(
     diagnostics
 }
 
-fn get_instance_names(api_manager: &ApiManager) -> Vec<CompletionItem> {
+fn get_instance_names(instance_name: &str, api_manager: &ApiManager) -> Vec<CompletionItem> {
     let mut diagnostics: Vec<CompletionItem> = Vec::new();
 
-    if let Some(inst_names) = api_manager.get_all_inst() {
+    if let Some(inst_names) = api_manager.get_all_inst(instance_name) {
         for property in &inst_names {
             diagnostics.push(CompletionItem {
                 label: property.clone(),
@@ -125,7 +125,7 @@ fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
     false
 }
 
-fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> bool {
+fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> Option<String> {
     if let Some(caps) = context.captures(region) {
         for i in 1..caps.len() {
             if let Some(group) = caps.get(i) {
@@ -133,12 +133,12 @@ fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> bo
                 let byte_end = group.end();
 
                 if byte_cursor >= byte_start && byte_cursor <= byte_end {
-                    return true;
+                    return Some(group.as_str().to_string());
                 }
             }
         }
     }
-    false
+    None
 }
 
 fn get_completion_items(
@@ -170,7 +170,9 @@ fn get_completion_items(
             let local_cursor_offset = cursor_byte_offset - group.start();
 
             let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
-            if is_cursor_in_context(local_cursor_offset, group_str, &brace_re) {
+            if let Some(_curr_context) =
+                is_cursor_in_context(local_cursor_offset, group_str, &brace_re)
+            {
                 if !context_is_assignment(doc, cursor_byte_offset) {
                     if let Some(instance_name) = extract_name_from_span(group_str) {
                         let diags = get_instance_property_diagnostics(&instance_name, api_manager);
@@ -184,8 +186,10 @@ fn get_completion_items(
             let quotes_re =
                 Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#)
                     .unwrap();
-            if is_cursor_in_context(local_cursor_offset, group_str, &quotes_re) {
-                let diags = get_instance_names(api_manager);
+            if let Some(curr_context) =
+                is_cursor_in_context(local_cursor_offset, group_str, &quotes_re)
+            {
+                let diags = get_instance_names(curr_context.as_ref(), api_manager);
                 diagnostics.extend(diags);
 
                 break;
