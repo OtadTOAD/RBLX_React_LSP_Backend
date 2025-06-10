@@ -95,10 +95,6 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        self.client
-            .log_message(MessageType::INFO, "Requested completion!")
-            .await;
-
         let file_manager = self.file_manager.lock().await;
         let api_manager = self.api_manager.lock().await;
         let text_document = params.text_document_position;

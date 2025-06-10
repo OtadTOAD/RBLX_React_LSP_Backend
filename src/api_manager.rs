@@ -64,13 +64,10 @@ impl ApiManager {
     }
 
     pub fn get_all_inst(&self, index: &str) -> Option<Vec<String>> {
-        const MAX_RESULTS: usize = 100;
-
         self.names.as_ref().map(|names| {
             names
                 .iter()
                 .filter(|name| self.is_subsequence(index, name))
-                .take(MAX_RESULTS)
                 .cloned()
                 .collect()
         })
