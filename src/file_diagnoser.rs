@@ -141,6 +141,35 @@ fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> Op
     None
 }
 
+fn find_mattching_paren(doc: &str, start: usize) -> usize {
+    let mut depth = 1;
+    for (offset, ch) in doc[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return start + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    doc.len()
+}
+
+fn extract_create_element_groups(doc: &str, var_name: &str) -> Vec<(usize, usize, String)> {
+    let needle = format!("{var_name}.createElement(");
+    let mut groups = Vec::new();
+
+    for start in doc.match_indices(&needle).map(|(i, _)| i + needle.len()) {
+        let end = find_mattching_paren(doc, start);
+        groups.push((start, end, doc[start..end].to_string()));
+    }
+
+    groups
+}
+
 fn get_completion_items(
     doc: &str,
     cursor: &Position,
@@ -158,42 +187,36 @@ fn get_completion_items(
     let cursor_byte_offset =
         position_to_byte_offset(doc, cursor).expect("Invalid position given for doc!");
 
-    let create_element_pattern = format!(
-        r#"(?s){}\.createElement\s*\((.*?)\)"#,
-        variable_name.unwrap()
-    );
-    let rgx = Regex::new(&create_element_pattern).unwrap();
+    let groups = extract_create_element_groups(doc, &variable_name.unwrap());
+    for (start, end, group_str) in groups {
+        if cursor_byte_offset < start || cursor_byte_offset > end {
+            continue;
+        }
+        let local_cursor_offset = cursor_byte_offset.saturating_sub(start);
 
-    for caps in rgx.captures_iter(doc) {
-        if let Some(group) = caps.get(1) {
-            let group_str = group.as_str();
-            let local_cursor_offset = cursor_byte_offset - group.start();
-
-            let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
-            if let Some(_curr_context) =
-                is_cursor_in_context(local_cursor_offset, group_str, &brace_re)
-            {
-                if !context_is_assignment(doc, cursor_byte_offset) {
-                    if let Some(instance_name) = extract_name_from_span(group_str) {
-                        let diags = get_instance_property_diagnostics(&instance_name, api_manager);
-                        diagnostics.extend(diags);
-                    }
+        let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
+        if let Some(_curr_context) =
+            is_cursor_in_context(local_cursor_offset, &group_str, &brace_re)
+        {
+            if !context_is_assignment(doc, cursor_byte_offset) {
+                if let Some(instance_name) = extract_name_from_span(&group_str) {
+                    let diags = get_instance_property_diagnostics(&instance_name, api_manager);
+                    diagnostics.extend(diags);
                 }
-
-                break;
             }
 
-            let quotes_re =
-                Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#)
-                    .unwrap();
-            if let Some(curr_context) =
-                is_cursor_in_context(local_cursor_offset, group_str, &quotes_re)
-            {
-                let diags = get_instance_names(curr_context.as_ref(), api_manager);
-                diagnostics.extend(diags);
+            break;
+        }
 
-                break;
-            }
+        let quotes_re =
+            Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#).unwrap();
+        if let Some(curr_context) =
+            is_cursor_in_context(local_cursor_offset, &group_str, &quotes_re)
+        {
+            let diags = get_instance_names(curr_context.as_ref(), api_manager);
+            diagnostics.extend(diags);
+
+            break;
         }
     }
 
