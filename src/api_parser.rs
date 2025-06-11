@@ -1,7 +1,5 @@
 // This script handles scraping roblox API and generating look up table
 
-use bincode::config::standard;
-use bincode::{decode_from_std_read, encode_into_std_write, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -77,14 +75,14 @@ impl Default for ValueType {
     }
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ParsedInstance {
     pub instance: String,
     pub superclass: String,
     pub properties: Vec<ParsedProperty>,
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ParsedProperty {
     pub name: String,
     pub data_type: String,
@@ -99,9 +97,8 @@ fn get_cache_file_path() -> PathBuf {
 pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error + Send + Sync>> {
     let api_cache_path = get_cache_file_path();
     if api_cache_path.exists() {
-        let mut file = File::open(&api_cache_path)?;
-        let (parsed_api, _bytes_read): (ParsedInstances, usize) =
-            decode_from_std_read(&mut file, standard())?;
+        let bytes = fs::read(api_cache_path)?;
+        let parsed_api: ParsedInstances = bincode::deserialize(&bytes)?;
         Ok(Some(parsed_api))
     } else {
         Ok(None)
@@ -110,12 +107,11 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error 
 
 pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {
     let api_cache_path = get_cache_file_path();
-    let mut file = fs::File::create(api_cache_path)?;
-    encode_into_std_write(parsed_instances, &mut file, standard())?;
-    file.flush()?;
+    let encoded = bincode::serialize(parsed_instances)?;
+    let mut file = File::create(api_cache_path)?;
+    file.write_all(&encoded)?;
     Ok(())
 }
-
 pub async fn create_api_file_readable(path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let file_path = path.join("readable_serialized_api.json");
     let mut file = fs::File::create(file_path)?;
