@@ -65,7 +65,10 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["rblx-react-lsp.genMetadata".to_string()],
+                    commands: vec![
+                        "rblx-react-lsp.genMetadata".to_string(),
+                        "rblx-react-lsp.readCache".to_string(),
+                    ],
                     work_done_progress_options: Default::default(),
                 }),
                 completion_provider: Some(CompletionOptions {
