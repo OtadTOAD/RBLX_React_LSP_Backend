@@ -1,8 +1,10 @@
 // This script handles scraping roblox API and generating look up table
 
+use bincode::config::standard;
+use bincode::{decode_from_std_read, encode_into_std_write, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
+use std::fs::File;
 use std::path::PathBuf;
 use std::{env, fs};
 
@@ -74,14 +76,14 @@ impl Default for ValueType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone)]
 pub struct ParsedInstance {
     pub instance: String,
     pub superclass: String,
     pub properties: Vec<ParsedProperty>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone)]
 pub struct ParsedProperty {
     pub name: String,
     pub data_type: String,
@@ -90,14 +92,15 @@ pub struct ParsedProperty {
 fn get_cache_file_path() -> PathBuf {
     let exe_path = env::current_exe().expect("Failed to get current exe path!");
     let exe_dir = exe_path.parent().expect("Failed to get exe dir!");
-    exe_dir.join("serialized_api_json.json")
+    exe_dir.join("serialized_api_json.bin")
 }
 
 pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>> {
     let api_cache_path = get_cache_file_path();
     if api_cache_path.exists() {
-        let cache_content = fs::read_to_string(api_cache_path)?;
-        let parsed_api: ParsedInstances = serde_json::from_str(&cache_content)?;
+        let mut file = File::open(&api_cache_path)?;
+        let (parsed_api, _bytes_read): (ParsedInstances, usize) =
+            decode_from_std_read(&mut file, standard())?;
         Ok(Some(parsed_api))
     } else {
         Ok(None)
@@ -106,10 +109,8 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>
 
 pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {
     let api_cache_path = get_cache_file_path();
-
-    let serialized = serde_json::to_string_pretty(parsed_instances)?;
     let mut file = fs::File::create(api_cache_path)?;
-    file.write_all(serialized.as_bytes())?;
+    encode_into_std_write(parsed_instances, &mut file, standard())?;
     Ok(())
 }
 
