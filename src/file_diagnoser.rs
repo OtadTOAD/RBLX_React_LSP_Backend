@@ -54,12 +54,14 @@ fn get_instance_property_diagnostics(
 ) -> Vec<CompletionItem> {
     let mut diagnostics: Vec<CompletionItem> = Vec::new();
 
-    if let Some(parsed_instance) = api_manager.lookup_inst(instance_name) {
-        for property in &parsed_instance.properties {
+    if let Some(parsed_instance) = api_manager.lookup_properties(instance_name) {
+        for (i, (name, data_type)) in parsed_instance.into_iter().enumerate() {
             diagnostics.push(CompletionItem {
-                label: property.name.clone(),
+                label: name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
-                detail: Some(property.data_type.clone()),
+                detail: Some(data_type.clone()),
+                sort_text: Some(format!("OTAD: {:05}", i)),
+
                 ..Default::default()
             });
         }
@@ -72,10 +74,12 @@ fn get_instance_names(instance_name: &str, api_manager: &ApiManager) -> Vec<Comp
     let mut diagnostics: Vec<CompletionItem> = Vec::new();
 
     if let Some(inst_names) = api_manager.get_all_inst(instance_name) {
-        for property in &inst_names {
+        for (i, property) in inst_names.into_iter().enumerate() {
             diagnostics.push(CompletionItem {
                 label: property.clone(),
                 kind: Some(CompletionItemKind::CLASS),
+                sort_text: Some(format!("OTAD: {:05}", i)),
+
                 ..Default::default()
             });
         }

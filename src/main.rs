@@ -13,7 +13,8 @@ use tower_lsp::{
         CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
         DidCloseTextDocumentParams, DidOpenTextDocumentParams, ExecuteCommandOptions,
         ExecuteCommandParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-        ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+        ServerCapabilities, TextDocumentContentChangeEvent, TextDocumentSyncCapability,
+        TextDocumentSyncKind,
     },
     Client, LanguageServer, LspService, Server,
 };
@@ -110,6 +111,8 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let mut file_manager = self.file_manager.lock().await;
+        let mut api_manager = self.api_manager.lock().await;
+        api_manager.update_freq(&params.text_document.text, 1);
         file_manager.on_opened_file(
             params.text_document.uri,
             params.text_document.text,
@@ -119,6 +122,15 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let mut file_manager = self.file_manager.lock().await;
+        let mut api_manager = self.api_manager.lock().await;
+        api_manager.update_freq(
+            &params
+                .content_changes
+                .iter()
+                .map(|change: &TextDocumentContentChangeEvent| change.text.as_str())
+                .collect::<String>(),
+            1,
+        );
         file_manager.on_changed_file(
             &params.text_document.uri,
             &params.content_changes,
@@ -127,8 +139,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let mut mutex_fm = self.file_manager.lock().await;
-        mutex_fm.on_closed_file(&params.text_document.uri);
+        let mut file_manager = self.file_manager.lock().await;
+        let mut api_manager = self.api_manager.lock().await;
+
+        if let Some(doc) = file_manager.get_text(&params.text_document.uri) {
+            api_manager.update_freq(doc, 1);
+        }
+        file_manager.on_closed_file(&params.text_document.uri);
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
