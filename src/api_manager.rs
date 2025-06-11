@@ -28,7 +28,7 @@ impl ApiManager {
     }
 
     // This loads api from cached file
-    pub async fn load_api(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn load_api(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let cache_result = get_cache()?;
         if cache_result.is_none() {
             return Err("Failed to load api from cache!".into());

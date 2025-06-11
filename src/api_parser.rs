@@ -96,7 +96,7 @@ fn get_cache_file_path() -> PathBuf {
     exe_dir.join("serialized_api.bin")
 }
 
-pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>> {
+pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error + Send + Sync>> {
     let api_cache_path = get_cache_file_path();
     if api_cache_path.exists() {
         let mut file = File::open(&api_cache_path)?;

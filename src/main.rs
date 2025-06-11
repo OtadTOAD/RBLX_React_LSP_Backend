@@ -87,12 +87,21 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let mut api_manager = self.api_manager.lock().await;
+        let api_manager = self.api_manager.clone(); // Clones Arc, not the actual manager
+        let client = self.client.clone(); // Clones internal client handle
 
-        let _ = api_manager
-            .load_api()
-            .await
-            .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+        tokio::spawn(async move {
+            let mut api_manager = api_manager.lock().await;
+            if let Err(e) = api_manager.load_api().await {
+                let _ = client
+                    .log_message(MessageType::ERROR, format!("Failed to load API: {}", e))
+                    .await;
+            } else {
+                let _ = client
+                    .log_message(MessageType::INFO, "API loaded in background.")
+                    .await;
+            }
+        });
 
         self.client
             .log_message(MessageType::INFO, "Server initialized!")
