@@ -5,6 +5,7 @@ use bincode::{decode_from_std_read, encode_into_std_write, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 use std::{env, fs};
 
@@ -92,7 +93,7 @@ pub struct ParsedProperty {
 fn get_cache_file_path() -> PathBuf {
     let exe_path = env::current_exe().expect("Failed to get current exe path!");
     let exe_dir = exe_path.parent().expect("Failed to get exe dir!");
-    exe_dir.join("serialized_api_json.bin")
+    exe_dir.join("serialized_api.bin")
 }
 
 pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>> {
@@ -105,6 +106,22 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>
     } else {
         Ok(None)
     }
+}
+
+pub fn create_api_file_readable() -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = fs::File::create("readable_serialized_api.json")?;
+
+    if let Ok(Some(cache)) = get_cache() {
+        let serialized_json = serde_json::to_string_pretty(&cache)?;
+        file.write_all(serialized_json.as_bytes())?;
+    } else {
+        file.write_all(
+            b"No cache found, please use command to generate metadata (in command palette)",
+        )?;
+    }
+
+    file.flush()?;
+    Ok(())
 }
 
 pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {

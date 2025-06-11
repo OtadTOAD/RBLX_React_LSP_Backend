@@ -18,7 +18,8 @@ use tower_lsp::{
 };
 
 use crate::{
-    api_manager::ApiManager, file_diagnoser::generate_auto_completions, file_manager::FileManager,
+    api_manager::ApiManager, api_parser::create_api_file_readable,
+    file_diagnoser::generate_auto_completions, file_manager::FileManager,
 };
 
 #[derive(Debug)]
@@ -151,6 +152,8 @@ impl LanguageServer for Backend {
                 .download_api()
                 .await
                 .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+        } else if params.command == "rblx-react-lsp.readCache" {
+            create_api_file_readable().unwrap();
         }
 
         Ok(None)
