@@ -5,7 +5,7 @@ use std::collections::HashMap;
 pub struct ApiManager {
     instances: Option<HashMap<String, ParsedInstance>>,
     names: Option<Vec<String>>,
-    freq_lookup: HashMap<String, usize>,
+    pub freq_lookup: HashMap<String, usize>,
 }
 
 impl ApiManager {
@@ -47,7 +47,7 @@ impl ApiManager {
 
     fn build_word_freq(doc: &str) -> HashMap<String, usize> {
         let mut freq = HashMap::new();
-        for word in doc.split(|c: char| !c.is_alphabetic()) {
+        for word in doc.split(|c: char| !c.is_alphanumeric() && c != '_') {
             if !word.is_empty() {
                 *freq.entry(word.to_string()).or_insert(0) += 1;
             }
@@ -55,19 +55,25 @@ impl ApiManager {
         freq
     }
 
-    pub fn update_freq(&mut self, doc: &str, multiplier: usize) {
+    pub fn update_freq(&mut self, doc: &str) {
         let word_freq = Self::build_word_freq(doc);
         let look_up = &mut self.freq_lookup;
 
         if let Some(instance_list) = self.instances.as_ref() {
             for (name, inst) in instance_list {
-                *look_up.entry(name.clone()).or_insert(0) +=
-                    multiplier * (*word_freq.get(name).unwrap_or(&0));
+                if let Some(&count) = word_freq.get(name) {
+                    if count > 0 {
+                        look_up.insert(name.clone(), count);
+                    }
+                }
 
                 for property in &inst.properties {
                     let prop_name = &property.name;
-                    *look_up.entry(prop_name.clone()).or_insert(0) +=
-                        multiplier * (*word_freq.get(prop_name).unwrap_or(&0));
+                    if let Some(&count) = word_freq.get(prop_name) {
+                        if count > 0 {
+                            look_up.insert(prop_name.clone(), count);
+                        }
+                    }
                 }
             }
         }
