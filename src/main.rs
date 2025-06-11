@@ -3,8 +3,9 @@ mod api_parser;
 mod file_diagnoser;
 mod file_manager;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
+use serde_json::Value;
 use tokio::sync::Mutex;
 use tower_lsp::{
     jsonrpc::Result,
@@ -65,10 +66,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec![
-                        "rblx-react-lsp.genMetadata".to_string(),
-                        "rblx-react-lsp.readCache".to_string(),
-                    ],
+                    commands: vec!["rblx-react-lsp.genMetadata".to_string()],
                     work_done_progress_options: Default::default(),
                 }),
                 completion_provider: Some(CompletionOptions {
@@ -156,7 +154,19 @@ impl LanguageServer for Backend {
                 .await
                 .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
         } else if params.command == "rblx-react-lsp.readCache" {
-            create_api_file_readable().unwrap();
+            let args = params.arguments;
+            if let Some(Value::String(path_str)) = args.get(0) {
+                let path = PathBuf::from(path_str);
+                if path.exists() {
+                    let _ = create_api_file_readable(path)
+                        .await
+                        .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+                } else {
+                    self.client
+                        .log_message(MessageType::LOG, "Failed to find path from arguments!")
+                        .await;
+                }
+            }
         }
 
         Ok(None)

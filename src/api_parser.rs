@@ -108,26 +108,24 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error>
     }
 }
 
-pub fn create_api_file_readable() -> Result<(), Box<dyn std::error::Error>> {
-    let mut file = fs::File::create("readable_serialized_api.json")?;
-
-    if let Ok(Some(cache)) = get_cache() {
-        let serialized_json = serde_json::to_string_pretty(&cache)?;
-        file.write_all(serialized_json.as_bytes())?;
-    } else {
-        file.write_all(
-            b"No cache found, please use command to generate metadata (in command palette)",
-        )?;
-    }
-
-    file.flush()?;
-    Ok(())
-}
-
 pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {
     let api_cache_path = get_cache_file_path();
     let mut file = fs::File::create(api_cache_path)?;
     encode_into_std_write(parsed_instances, &mut file, standard())?;
+    file.flush()?;
+    Ok(())
+}
+
+pub async fn create_api_file_readable(path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let file_path = path.join("readable_serialized_api.json");
+    let mut file = fs::File::create(file_path)?;
+
+    let download_result = download_api().await?;
+    let processed_result = parse_api_dump(&download_result);
+    let json_string = serde_json::to_string_pretty(&processed_result)?;
+    file.write_all(json_string.as_bytes())?;
+    file.flush()?;
+
     Ok(())
 }
 
