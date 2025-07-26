@@ -80,6 +80,7 @@ pub struct ParsedInstance {
     pub instance: String,
     pub superclass: String,
     pub properties: Vec<ParsedProperty>,
+    pub events: Vec<ParsedProperty>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -158,26 +159,36 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
         }
 
         while let Some(top) = parsing_stack.pop() {
-            let mut inst_members: Vec<&Member> = top
+            let inst_members: Vec<&Member> = top
                 .members
                 .iter()
-                .filter(|member| {
-                    member.member_type == "Property"
-                        && !member.tags.contains(&"Deprecated".to_string())
-                        && !member.tags.contains(&"ReadOnly".to_string())
+                .filter(|m| {
+                    (m.member_type == "Property" || m.member_type == "Event")
+                        && !m.tags.contains(&"Deprecated".to_string())
+                        && !m.tags.contains(&"ReadOnly".to_string())
                 })
                 .collect();
-            if let Some(parent_inst) = inst_cache.get(top.superclass.as_str()) {
-                inst_members.extend(parent_inst)
-            }
 
-            let properties: Vec<ParsedProperty> = inst_members
-                .iter()
+            let (props, events): (Vec<&Member>, Vec<&Member>) = inst_members
+                .clone()
+                .into_iter()
+                .partition(|m| m.member_type == "Property");
+
+            let properties: Vec<ParsedProperty> = props
+                .into_iter()
                 .map(|member| ParsedProperty {
                     name: member.name.clone(),
                     data_type: member.value_type.name.clone(),
                 })
                 .collect();
+            let events: Vec<ParsedProperty> = events
+                .into_iter()
+                .map(|member| ParsedProperty {
+                    name: member.name.clone(),
+                    data_type: "Function".to_string(),
+                })
+                .collect();
+
             inst_cache.insert(top.name.as_str(), inst_members); // You need to cache before parsing properties otherwise it will throw error as you are moving references
             parsed_instances.insert(
                 top.name.clone(),
@@ -185,6 +196,7 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
                     instance: top.name.clone(),
                     superclass: top.superclass.clone(),
                     properties,
+                    events,
                 },
             );
         }

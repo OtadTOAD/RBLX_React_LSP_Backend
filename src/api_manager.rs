@@ -101,6 +101,28 @@ impl ApiManager {
         Some(props)
     }
 
+    pub fn lookup_events(&self, inst_name: &str) -> Option<Vec<(String, String)>> {
+        let instances = self.instances.as_ref()?;
+        let instance = instances.get(inst_name)?;
+
+        let mut props: Vec<(String, String)> = instance
+            .events
+            .iter()
+            .map(|p| (p.name.clone(), p.data_type.clone()))
+            .collect();
+
+        props.sort_by(|a, b| {
+            let freq_a = self.freq_lookup.get(&a.0).copied().unwrap_or(0);
+            let freq_b = self.freq_lookup.get(&b.0).copied().unwrap_or(0);
+            freq_b
+                .cmp(&freq_a) // First by freq
+                .then_with(|| b.0.len().cmp(&a.0.len())) // Then by length(Longer text is annoying to type)
+                .then_with(|| a.0.cmp(&b.0)) // Then by lex as tie breaker
+        });
+
+        Some(props)
+    }
+
     pub fn get_all_inst(&self, index: &str) -> Option<Vec<String>> {
         self.names.as_ref().map(|names| {
             let mut filtered: Vec<String> = names

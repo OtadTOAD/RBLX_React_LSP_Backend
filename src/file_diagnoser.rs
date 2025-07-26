@@ -60,7 +60,29 @@ fn get_instance_property_diagnostics(
                 label: name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(data_type.clone()),
-                sort_text: Some(format!("OTAD: {:05}", i)),
+                sort_text: Some(format!("A_OTAD: {:05}", i)),
+
+                ..Default::default()
+            });
+        }
+    }
+
+    diagnostics
+}
+
+fn get_instance_events_diagnostics(
+    instance_name: &str,
+    api_manager: &ApiManager,
+) -> Vec<CompletionItem> {
+    let mut diagnostics: Vec<CompletionItem> = Vec::new();
+
+    if let Some(parsed_instance) = api_manager.lookup_events(instance_name) {
+        for (i, (name, data_type)) in parsed_instance.into_iter().enumerate() {
+            diagnostics.push(CompletionItem {
+                label: name.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(data_type.clone()),
+                sort_text: Some(format!("A_OTAD: {:05}", i)),
 
                 ..Default::default()
             });
@@ -129,7 +151,11 @@ fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
     false
 }
 
-fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> Option<String> {
+fn is_cursor_in_context(
+    byte_cursor: usize,
+    region: &str,
+    context: &Regex,
+) -> Option<(String, usize, usize)> {
     if let Some(caps) = context.captures(region) {
         for i in 1..caps.len() {
             if let Some(group) = caps.get(i) {
@@ -137,7 +163,7 @@ fn is_cursor_in_context(byte_cursor: usize, region: &str, context: &Regex) -> Op
                 let byte_end = group.end();
 
                 if byte_cursor >= byte_start && byte_cursor <= byte_end {
-                    return Some(group.as_str().to_string());
+                    return Some((group.as_str().to_string(), byte_start, byte_end));
                 }
             }
         }
@@ -191,7 +217,8 @@ fn get_completion_items(
     let cursor_byte_offset =
         position_to_byte_offset(doc, cursor).expect("Invalid position given for doc!");
 
-    let groups = extract_create_element_groups(doc, &variable_name.unwrap());
+    let variable_name_str = &variable_name.unwrap();
+    let groups = extract_create_element_groups(doc, variable_name_str);
     for (start, end, group_str) in groups {
         if cursor_byte_offset < start || cursor_byte_offset > end {
             continue;
@@ -202,6 +229,32 @@ fn get_completion_items(
         if let Some(_curr_context) =
             is_cursor_in_context(local_cursor_offset, &group_str, &brace_re)
         {
+            let event_re = Regex::new(r"(?s)\[(.*?)\]").unwrap();
+            if let Some((event_context, start, end)) =
+                is_cursor_in_context(local_cursor_offset, &group_str, &event_re)
+            {
+                let event_needle = format!("{}.Event.", variable_name_str);
+                if let Some(rel_pos) = event_context.find(&event_needle) {
+                    let dot_offset = start + rel_pos + event_needle.len() - 1;
+                    if local_cursor_offset >= dot_offset && local_cursor_offset < end {
+                        if let Some(instance_name) = extract_name_from_span(&group_str) {
+                            let diags =
+                                get_instance_events_diagnostics(&instance_name, api_manager);
+                            diagnostics.extend(diags);
+
+                            break;
+                        }
+                    }
+                }
+
+                if let Some(instance_name) = extract_name_from_span(&group_str) {
+                    let diags = get_instance_events_diagnostics(&instance_name, api_manager);
+                    diagnostics.extend(diags);
+
+                    break;
+                }
+            }
+
             if !context_is_assignment(doc, cursor_byte_offset) {
                 if let Some(instance_name) = extract_name_from_span(&group_str) {
                     let diags = get_instance_property_diagnostics(&instance_name, api_manager);
@@ -214,7 +267,7 @@ fn get_completion_items(
 
         let quotes_re =
             Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#).unwrap();
-        if let Some(curr_context) =
+        if let Some((curr_context, _start, _end)) =
             is_cursor_in_context(local_cursor_offset, &group_str, &quotes_re)
         {
             let diags = get_instance_names(curr_context.as_ref(), api_manager);
