@@ -159,7 +159,7 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
         }
 
         while let Some(top) = parsing_stack.pop() {
-            let inst_members: Vec<&Member> = top
+            let mut inst_members: Vec<&Member> = top
                 .members
                 .iter()
                 .filter(|m| {
@@ -168,6 +168,9 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
                         && !m.tags.contains(&"ReadOnly".to_string())
                 })
                 .collect();
+            if let Some(parent_inst) = inst_cache.get(top.superclass.as_str()) {
+                inst_members.extend(parent_inst);
+            }
 
             let (props, events): (Vec<&Member>, Vec<&Member>) = inst_members
                 .clone()
