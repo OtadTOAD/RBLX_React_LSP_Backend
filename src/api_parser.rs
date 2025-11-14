@@ -43,6 +43,7 @@ pub struct Member {
     pub value_type: ValueType, // Value type (e.g., {"Category": "Primitive", "Name": "bool"})
 }
 
+/*
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Security {
     #[serde(default, rename = "Read")]
@@ -57,7 +58,7 @@ pub struct Serialization {
     pub can_load: bool, // Whether the member can be loaded
     #[serde(default, rename = "CanSave")]
     pub can_save: bool, // Whether the member can be saved
-}
+}*/
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ValueType {

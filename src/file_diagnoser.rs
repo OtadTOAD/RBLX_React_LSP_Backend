@@ -10,6 +10,10 @@ lazy_static! {
     static ref REACT_VAR_PATTERN: Regex = Regex::new(
         r#"(?i)\b(?:local\s+)?(\w+)\s*=\s*require\s*\(.*\.React\s*\)"#
     ).unwrap();
+    // Matches local <macro_name> = <react_var>.createElement
+    static ref CREATE_ELEMENT_MACRO_PATTERN: Regex = Regex::new(
+        r#"(?i)\b(?:local\s+)?(\w+)\s*=\s*(\w+)\.createElement\b"#
+    ).unwrap();
     static ref FIRST_QUOTES_PATTERN: Regex = Regex::new(r#""(.+)""#).unwrap();
 }
 
@@ -24,6 +28,28 @@ fn get_react_var_name(doc: &str) -> Option<String> {
         return Some(caps.get(1).unwrap().as_str().to_string());
     }
     None
+}
+
+// Find all createElement macros defined before the given byte offset
+// Returns a list of macro names that can be used as createElement
+fn get_create_element_macros(
+    doc: &str,
+    before_byte_offset: usize,
+    react_var_name: &str,
+) -> Vec<String> {
+    let mut macros = Vec::new();
+    let search_region = &doc[..before_byte_offset.min(doc.len())];
+
+    for caps in CREATE_ELEMENT_MACRO_PATTERN.captures_iter(search_region) {
+        if let (Some(macro_name), Some(var_name)) = (caps.get(1), caps.get(2)) {
+            // Check if the variable name matches the React variable name
+            if var_name.as_str() == react_var_name {
+                macros.push(macro_name.as_str().to_string());
+            }
+        }
+    }
+
+    macros
 }
 
 fn extract_name_from_span(span: &str) -> Option<String> {
@@ -188,6 +214,40 @@ fn find_mattching_paren(doc: &str, start: usize) -> usize {
     doc.len()
 }
 
+fn find_matching_brace(doc: &str, start: usize) -> usize {
+    let mut depth = 1;
+    for (offset, ch) in doc[start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return start + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    doc.len()
+}
+
+fn find_matching_bracket(doc: &str, start: usize) -> usize {
+    let mut depth = 1;
+    for (offset, ch) in doc[start..].char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return start + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    doc.len()
+}
+
 fn extract_create_element_groups(doc: &str, var_name: &str) -> Vec<(usize, usize, String)> {
     let needle = format!("{var_name}.createElement(");
     let mut groups = Vec::new();
@@ -198,6 +258,32 @@ fn extract_create_element_groups(doc: &str, var_name: &str) -> Vec<(usize, usize
     }
 
     groups
+}
+
+// Extract all createElement calls from both the original React variable and any macros
+// Only considers macros defined before the cursor position
+fn extract_all_create_element_groups(
+    doc: &str,
+    react_var_name: &str,
+    cursor_byte_offset: usize,
+) -> Vec<(usize, usize, String)> {
+    let mut all_groups = Vec::new();
+
+    // Add groups from the original React variable (e.g., React.createElement)
+    all_groups.extend(extract_create_element_groups(doc, react_var_name));
+
+    // Add groups from all macros defined before cursor position
+    let macros = get_create_element_macros(doc, cursor_byte_offset, react_var_name);
+    for macro_name in macros {
+        // For macros, we look for macro_name( instead of macro_name.createElement(
+        let needle = format!("{macro_name}(");
+        for start in doc.match_indices(&needle).map(|(i, _)| i + needle.len()) {
+            let end = find_mattching_paren(doc, start);
+            all_groups.push((start, end, doc[start..end].to_string()));
+        }
+    }
+
+    all_groups
 }
 
 fn get_completion_items(
@@ -218,25 +304,45 @@ fn get_completion_items(
         position_to_byte_offset(doc, cursor).expect("Invalid position given for doc!");
 
     let variable_name_str = &variable_name.unwrap();
-    let groups = extract_create_element_groups(doc, variable_name_str);
+    let groups = extract_all_create_element_groups(doc, variable_name_str, cursor_byte_offset);
     for (start, end, group_str) in groups {
         if cursor_byte_offset < start || cursor_byte_offset > end {
             continue;
         }
         let local_cursor_offset = cursor_byte_offset.saturating_sub(start);
 
-        let brace_re = Regex::new(r"(?s)\{(.*?)\}").unwrap();
-        if let Some(_curr_context) =
-            is_cursor_in_context(local_cursor_offset, &group_str, &brace_re)
-        {
-            let event_re = Regex::new(r"(?s)\[(.*?)\]").unwrap();
-            if let Some((event_context, start, end)) =
-                is_cursor_in_context(local_cursor_offset, &group_str, &event_re)
-            {
-                let event_needle = format!("{}.Event.", variable_name_str);
-                if let Some(rel_pos) = event_context.find(&event_needle) {
-                    let dot_offset = start + rel_pos + event_needle.len() - 1;
-                    if local_cursor_offset >= dot_offset && local_cursor_offset < end {
+        if let Some(brace_start) = group_str.find('{') {
+            let brace_end = find_matching_brace(&group_str, brace_start + 1);
+
+            if local_cursor_offset >= brace_start && local_cursor_offset <= brace_end {
+                let brace_content = &group_str[brace_start + 1..brace_end];
+                let cursor_in_brace = local_cursor_offset.saturating_sub(brace_start + 1);
+
+                if let Some(bracket_start) = brace_content.find('[') {
+                    let bracket_end = find_matching_bracket(brace_content, bracket_start + 1);
+
+                    if cursor_in_brace >= bracket_start && cursor_in_brace <= bracket_end {
+                        let event_context = &brace_content[bracket_start + 1..bracket_end];
+                        let cursor_in_bracket = cursor_in_brace.saturating_sub(bracket_start + 1);
+
+                        let event_needle = format!("{}.Event.", variable_name_str);
+                        if let Some(rel_pos) = event_context.find(&event_needle) {
+                            let dot_offset = rel_pos + event_needle.len() - 1;
+                            if cursor_in_bracket >= dot_offset
+                                && cursor_in_bracket < event_context.len()
+                            {
+                                if let Some(instance_name) = extract_name_from_span(&group_str) {
+                                    let diags = get_instance_events_diagnostics(
+                                        &instance_name,
+                                        api_manager,
+                                    );
+                                    diagnostics.extend(diags);
+
+                                    break;
+                                }
+                            }
+                        }
+
                         if let Some(instance_name) = extract_name_from_span(&group_str) {
                             let diags =
                                 get_instance_events_diagnostics(&instance_name, api_manager);
@@ -247,22 +353,15 @@ fn get_completion_items(
                     }
                 }
 
-                if let Some(instance_name) = extract_name_from_span(&group_str) {
-                    let diags = get_instance_events_diagnostics(&instance_name, api_manager);
-                    diagnostics.extend(diags);
-
-                    break;
+                if !context_is_assignment(doc, cursor_byte_offset) {
+                    if let Some(instance_name) = extract_name_from_span(&group_str) {
+                        let diags = get_instance_property_diagnostics(&instance_name, api_manager);
+                        diagnostics.extend(diags);
+                    }
                 }
-            }
 
-            if !context_is_assignment(doc, cursor_byte_offset) {
-                if let Some(instance_name) = extract_name_from_span(&group_str) {
-                    let diags = get_instance_property_diagnostics(&instance_name, api_manager);
-                    diagnostics.extend(diags);
-                }
+                break;
             }
-
-            break;
         }
 
         let quotes_re =
@@ -294,7 +393,10 @@ pub fn generate_auto_completions(
 
 #[cfg(test)]
 mod tests {
-    use crate::file_diagnoser::{extract_name_from_span, get_react_var_name};
+    use crate::file_diagnoser::{
+        extract_name_from_span, find_matching_brace, find_matching_bracket, find_mattching_paren,
+        get_create_element_macros, get_react_var_name,
+    };
 
     #[test]
     fn test_react_variable_name_search() {
@@ -345,5 +447,112 @@ mod tests {
             None
         );
         assert_eq!(extract_name_from_span(r#"{"Wrong"}"#), None);
+    }
+
+    #[test]
+    fn test_find_matching_paren() {
+        let text = "(simple)";
+        assert_eq!(find_mattching_paren(text, 1), 7);
+
+        let text = "(nested (inner))";
+        assert_eq!(find_mattching_paren(text, 1), 15);
+
+        let text = "(a (b (c)))";
+        assert_eq!(find_mattching_paren(text, 1), 10);
+
+        let text = "(multiple (args), (more))";
+        assert_eq!(find_mattching_paren(text, 1), 24);
+
+        let text = "(unclosed";
+        assert_eq!(find_mattching_paren(text, 1), text.len());
+    }
+
+    #[test]
+    fn test_find_matching_brace() {
+        let text = "{simple}";
+        assert_eq!(find_matching_brace(text, 1), 7);
+
+        let text = "{nested {inner}}";
+        assert_eq!(find_matching_brace(text, 1), 15);
+
+        let text = "{a {b {c}}}";
+        assert_eq!(find_matching_brace(text, 1), 10);
+
+        let text = "{Visible = f({foo = 1, bar = 2})}";
+        assert_eq!(find_matching_brace(text, 1), 32);
+
+        let text = "Visible = f({foo = 1, bar = 2})";
+        assert_eq!(find_matching_brace(text, 13), 29);
+
+        let text = "{unclosed";
+        assert_eq!(find_matching_brace(text, 1), text.len());
+    }
+
+    #[test]
+    fn test_find_matching_bracket() {
+        let text = "[simple]";
+        assert_eq!(find_matching_bracket(text, 1), 7);
+
+        let text = "[nested [inner]]";
+        assert_eq!(find_matching_bracket(text, 1), 15);
+
+        let text = "[a [b [c]]]";
+        assert_eq!(find_matching_bracket(text, 1), 10);
+
+        let text = "[React.Event.MouseButton1Click] = handler";
+        assert_eq!(find_matching_bracket(text, 1), 30);
+
+        let text = "[unclosed";
+        assert_eq!(find_matching_bracket(text, 1), text.len());
+    }
+
+    #[test]
+    fn test_create_element_macros() {
+        let doc = r#"
+local React = require(game.ReplicatedStorage.React)
+local e = React.createElement
+local create = React.createElement
+
+local frame = e("Frame", {})
+local label = create("TextLabel", {})
+"#;
+
+        let macros = get_create_element_macros(doc, doc.len(), "React");
+        assert!(macros.contains(&"e".to_string()));
+        assert!(macros.contains(&"create".to_string()));
+        assert_eq!(macros.len(), 2);
+
+        let before_create = doc.find("local create").unwrap();
+        let macros_partial = get_create_element_macros(doc, before_create, "React");
+        assert!(macros_partial.contains(&"e".to_string()));
+        assert!(!macros_partial.contains(&"create".to_string()));
+        assert_eq!(macros_partial.len(), 1);
+
+        let macros_wrong = get_create_element_macros(doc, doc.len(), "WrongName");
+        assert_eq!(macros_wrong.len(), 0);
+    }
+
+    #[test]
+    fn test_create_element_macros_various_formats() {
+        let doc1 = r#"
+local React = require(game.React)
+e = React.createElement
+"#;
+        let macros1 = get_create_element_macros(doc1, doc1.len(), "React");
+        assert!(macros1.contains(&"e".to_string()));
+
+        let doc2 = r#"
+local MyReact = require(game.React)
+local create = MyReact.createElement
+"#;
+        let macros2 = get_create_element_macros(doc2, doc2.len(), "MyReact");
+        assert!(macros2.contains(&"create".to_string()));
+
+        let doc3 = r#"
+local React = require(game.React)
+local x = something.else
+"#;
+        let macros3 = get_create_element_macros(doc3, doc3.len(), "React");
+        assert_eq!(macros3.len(), 0);
     }
 }
