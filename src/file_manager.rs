@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use reqwest::Url;
-use tower_lsp::lsp_types::TextDocumentContentChangeEvent;
+use tower_lsp::lsp_types::{TextDocumentContentChangeEvent, Url};
 
 #[derive(Debug)]
 struct TextDoc {
