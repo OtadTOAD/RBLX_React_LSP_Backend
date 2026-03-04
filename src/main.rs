@@ -246,6 +246,12 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
+    // Incase abort happens(Since we set panic level to abort)
+    // Might as well add something so info gets logged
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("LSP panicked: {}", info);
+    }));
+
     let (service, socket) = LspService::new(|client| Backend {
         client,
         file_manager: Arc::new(Mutex::new(FileManager::new())),
