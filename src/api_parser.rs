@@ -119,7 +119,8 @@ pub async fn create_api_file_readable(path: PathBuf) -> Result<(), Box<dyn std::
     let mut file = fs::File::create(file_path)?;
 
     let download_result = download_api().await?;
-    let processed_result = parse_api_dump(&download_result);
+    let processed_result = parse_api_dump(&download_result)?; // ? unwraps Ok or returns Err early
+
     let json_string = serde_json::to_string_pretty(&processed_result)?;
     file.write_all(json_string.as_bytes())?;
     file.flush()?;
@@ -209,10 +210,9 @@ fn process_api_dump_json(api_dump_json: &ApiDump) -> ParsedInstances {
     parsed_instances
 }
 
-pub fn parse_api_dump(api_dump: &str) -> ParsedInstances {
-    let api_dump_json: ApiDump =
-        serde_json::from_str(&api_dump).expect("Failed to serialize JSON!");
-    process_api_dump_json(&api_dump_json)
+pub fn parse_api_dump(api_dump: &str) -> Result<ParsedInstances, serde_json::Error> {
+    let api_dump_json: ApiDump = serde_json::from_str(api_dump)?;
+    Ok(process_api_dump_json(&api_dump_json))
 }
 
 pub async fn download_api() -> Result<String, reqwest::Error> {
@@ -229,33 +229,43 @@ pub async fn download_api() -> Result<String, reqwest::Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Write, path::Path};
+    use crate::api_parser::{download_api, parse_api_dump};
+    use std::{env, fs, io::Write};
 
-    use crate::api_parser::{cache_file, download_api, parse_api_dump};
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = env::temp_dir().join("rblx_react_lsp_tests");
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[tokio::test]
     async fn test_downloading_api() -> Result<(), Box<dyn std::error::Error>> {
-        let dump_path = "api_dump.json";
+        let dump_path = temp_dir().join("api_dump.json");
 
         let download_result = download_api().await?;
-        let mut file = fs::File::create(dump_path)?;
+        let mut file = fs::File::create(&dump_path)?;
         file.write_all(download_result.as_bytes())?;
         file.flush()?;
 
+        fs::remove_file(&dump_path).ok();
         Ok(())
     }
 
     #[tokio::test]
     async fn test_processing_with_cache() -> Result<(), Box<dyn std::error::Error>> {
-        let dump_path = "api_dump.json";
-        if !Path::new(dump_path).exists() {
-            return Err("Failed to find api_dump.json!".into());
+        let dump_path = temp_dir().join("api_dump.json");
+        if !dump_path.exists() {
+            return Err("Run test_downloading_api first to generate api_dump.json".into());
         }
 
-        let api_dump_cache_content = fs::read_to_string(dump_path)?;
-        let parsed_instances = parse_api_dump(&api_dump_cache_content);
-        cache_file(&parsed_instances)?;
+        let api_dump_cache_content = fs::read_to_string(&dump_path)?;
+        let parsed_instances = parse_api_dump(&api_dump_cache_content)?;
 
+        let cache_path = temp_dir().join("serialized_api.bin");
+        let encoded = bincode::serialize(&parsed_instances)?;
+        fs::write(&cache_path, encoded)?;
+
+        fs::remove_file(&cache_path).ok();
         Ok(())
     }
 }

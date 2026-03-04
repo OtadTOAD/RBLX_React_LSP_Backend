@@ -20,7 +20,7 @@ impl ApiManager {
     // This downloads and caches new api file, which then gets loaded
     pub async fn download_api(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let download_result = download_api().await?;
-        let parsed_instances = parse_api_dump(&download_result);
+        let parsed_instances = parse_api_dump(&download_result)?;
 
         cache_file(&parsed_instances)?;
         self.names = Some(parsed_instances.keys().cloned().collect());
