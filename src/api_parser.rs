@@ -107,14 +107,18 @@ pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error 
     }
 }
 
-pub fn cache_file(parsed_instances: &ParsedInstances) -> Result<(), Box<dyn std::error::Error>> {
+pub fn cache_file(
+    parsed_instances: &ParsedInstances,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let api_cache_path = get_cache_file_path();
     let encoded = bincode::serialize(parsed_instances)?;
     let mut file = File::create(api_cache_path)?;
     file.write_all(&encoded)?;
     Ok(())
 }
-pub async fn create_api_file_readable(path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn create_api_file_readable(
+    path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let file_path = path.join("readable_serialized_api.json");
     let mut file = fs::File::create(file_path)?;
 

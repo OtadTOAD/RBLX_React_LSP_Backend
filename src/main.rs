@@ -161,25 +161,75 @@ impl LanguageServer for Backend {
         &self,
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
-        if params.command == "rblx-react-lsp.genMetadata" {
-            let mut api_manager = self.api_manager.lock().await;
-            let _ = api_manager
-                .download_api()
-                .await
-                .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
-        } else if params.command == "rblx-react-lsp.readCache" {
-            let args = params.arguments;
-            if let Some(Value::String(path_str)) = args.get(0) {
-                let path = PathBuf::from(path_str);
-                if path.exists() {
-                    let _ = create_api_file_readable(path)
-                        .await
-                        .map_err(|e| self.client.log_message(MessageType::ERROR, e.to_string()));
+        match params.command.as_str() {
+            "rblx-react-lsp.genMetadata" => {
+                self.client
+                    .show_message(MessageType::INFO, "Downloading Roblox API dump...")
+                    .await;
+
+                let mut api_manager = self.api_manager.lock().await;
+                match api_manager.download_api().await {
+                    Ok(_) => {
+                        self.client
+                            .show_message(MessageType::INFO, "Roblox API loaded successfully")
+                            .await;
+                    }
+                    Err(e) => {
+                        self.client
+                            .show_message(
+                                MessageType::ERROR,
+                                format!("Failed to download API: {}", e),
+                            )
+                            .await;
+                    }
+                }
+            }
+
+            "rblx-react-lsp.readCache" => {
+                let args = params.arguments;
+                if let Some(Value::String(path_str)) = args.get(0) {
+                    let path = PathBuf::from(path_str);
+                    if path.exists() {
+                        self.client
+                            .show_message(MessageType::INFO, "Loading API from cache...")
+                            .await;
+                        match create_api_file_readable(path).await {
+                            Ok(_) => {
+                                self.client
+                                    .show_message(MessageType::INFO, "Cache loaded successfully")
+                                    .await;
+                            }
+                            Err(e) => {
+                                self.client
+                                    .show_message(
+                                        MessageType::ERROR,
+                                        format!("Failed to read cache: {}", e),
+                                    )
+                                    .await;
+                            }
+                        }
+                    } else {
+                        self.client
+                            .show_message(
+                                MessageType::WARNING,
+                                format!("Path does not exist: {}", path_str),
+                            )
+                            .await;
+                    }
                 } else {
                     self.client
-                        .log_message(MessageType::LOG, "Failed to find path from arguments!")
+                        .show_message(MessageType::WARNING, "No path argument provided")
                         .await;
                 }
+            }
+
+            unknown => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Unknown command received: {}", unknown),
+                    )
+                    .await;
             }
         }
 
