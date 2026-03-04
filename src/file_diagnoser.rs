@@ -329,6 +329,32 @@ fn get_completion_items(
             if local_cursor_offset >= brace_start && local_cursor_offset <= brace_end {
                 let brace_content = &group_str[brace_start + 1..brace_end];
                 let cursor_in_brace = local_cursor_offset.saturating_sub(brace_start + 1);
+
+                // Check if we are in nested group, if so we need to bail out
+                // Otherwise if you have nested function call inside properties table, it will provide auto complete suggestions
+                // (Which is pretty annoying)
+                let mut nested_search = 0;
+                let mut inside_nested_brace = false;
+                while let Some(rel_inner_brace) = brace_content[nested_search..].find('{') {
+                    let inner_brace_start = nested_search + rel_inner_brace;
+                    let inner_brace_end = find_matching_brace(brace_content, inner_brace_start + 1);
+
+                    if cursor_in_brace > inner_brace_start && cursor_in_brace < inner_brace_end {
+                        inside_nested_brace = true;
+                        break;
+                    }
+
+                    nested_search = inner_brace_end + 1;
+                    if nested_search >= brace_content.len() {
+                        break;
+                    }
+                }
+                if inside_nested_brace {
+                    // Cursor is inside a nested calls braces, not items props
+                    // try next group in the outer loop
+                    continue;
+                }
+
                 let event_needle = format!("{}.Event.", variable_name_str);
                 let change_needle = format!("{}.Change.", variable_name_str);
 
