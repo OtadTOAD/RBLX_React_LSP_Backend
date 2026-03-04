@@ -21,13 +21,7 @@ impl FileManager {
     }
 
     pub fn on_opened_file(&mut self, uri: Url, text: String, ver: i32) {
-        self.curr_files.insert(
-            uri,
-            TextDoc {
-                text: text,
-                ver: ver,
-            },
-        );
+        self.curr_files.insert(uri, TextDoc { text: text, ver });
     }
 
     pub fn on_changed_file(

@@ -142,9 +142,9 @@ impl LanguageServer for Backend {
         let text_document = params.text_document_position;
 
         let file_text = file_manager.get_text(&text_document.text_document.uri);
-        if file_text.is_some() {
+        if let Some(text) = file_text {
             if let Ok(diagnose_results) =
-                generate_auto_completions(file_text.unwrap(), &text_document.position, &api_manager)
+                generate_auto_completions(text, &text_document.position, &api_manager)
             {
                 return Ok(Some(diagnose_results));
             }
