@@ -14,7 +14,7 @@ lazy_static! {
     static ref CREATE_ELEMENT_MACRO_PATTERN: Regex = Regex::new(
         r#"(?i)\b(?:local\s+)?(\w+)\s*=\s*(\w+)\.createElement\b"#
     ).unwrap();
-    static ref FIRST_QUOTES_PATTERN: Regex = Regex::new(r#""(.+)""#).unwrap();
+    //static ref FIRST_QUOTES_PATTERN: Regex = Regex::new(r#""(.+)""#).unwrap();
 
     static ref FIND_QUOTES: Regex = Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#).unwrap();
 }
