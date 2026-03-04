@@ -6,7 +6,7 @@ use crate::api_manager::ApiManager;
 
 lazy_static! {
     // Matches require*(**.React) where * is any number of white space and ** is any number of characters
-    static ref REACT_PATTERN: Regex = Regex::new(r#"require\s*\(\s*[^)]*\.React\s*\)"#).unwrap();
+    static ref REACT_PATTERN: Regex = Regex::new(r#"(?i)require\s*\(\s*[^)]*\.React\s*\)"#).unwrap();
     static ref REACT_VAR_PATTERN: Regex = Regex::new(
         r#"(?i)\b(?:local\s+)?(\w+)\s*=\s*require\s*\(.*\.React\s*\)"#
     ).unwrap();
