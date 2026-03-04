@@ -308,12 +308,15 @@ fn get_completion_items(
     if variable_name.is_none() {
         return diagnostics;
     }
-
     let cursor_byte_offset =
         position_to_byte_offset(doc, cursor).expect("Invalid position given for doc!");
-
     let variable_name_str = &variable_name.unwrap();
-    let groups = extract_all_create_element_groups(doc, variable_name_str, cursor_byte_offset);
+    let mut groups = extract_all_create_element_groups(doc, variable_name_str, cursor_byte_offset);
+
+    // If we have multiple nested groups, we need to get inner most one(Which is smallest) since
+    // If cursor is in multiple groups { { {|} } }, closest(smallest) takes priority
+    groups.sort_by_key(|(start, end, _)| end.saturating_sub(*start));
+
     for (start, end, group_str) in groups {
         if cursor_byte_offset < start || cursor_byte_offset > end {
             continue;
@@ -326,46 +329,60 @@ fn get_completion_items(
             if local_cursor_offset >= brace_start && local_cursor_offset <= brace_end {
                 let brace_content = &group_str[brace_start + 1..brace_end];
                 let cursor_in_brace = local_cursor_offset.saturating_sub(brace_start + 1);
+                let event_needle = format!("{}.Event.", variable_name_str);
+                let change_needle = format!("{}.Change.", variable_name_str);
 
-                if let Some(bracket_start) = brace_content.find('[') {
+                let mut search_from = 0;
+                let mut handled = false;
+                while let Some(rel_bracket_start) = brace_content[search_from..].find('[') {
+                    let bracket_start = search_from + rel_bracket_start;
                     let bracket_end = find_matching_bracket(brace_content, bracket_start + 1);
 
                     if cursor_in_brace >= bracket_start && cursor_in_brace <= bracket_end {
-                        let event_context = &brace_content[bracket_start + 1..bracket_end];
+                        let bracket_content = &brace_content[bracket_start + 1..bracket_end];
                         let cursor_in_bracket = cursor_in_brace.saturating_sub(bracket_start + 1);
 
-                        let event_needle = format!("{}.Event.", variable_name_str);
-                        if let Some(rel_pos) = event_context.find(&event_needle) {
+                        if let Some(rel_pos) = bracket_content.find(&event_needle) {
+                            // Support event auto completions
                             let dot_offset = rel_pos + event_needle.len() - 1;
-                            if cursor_in_bracket >= dot_offset
-                                && cursor_in_bracket < event_context.len()
-                            {
+                            if cursor_in_bracket >= dot_offset {
                                 if let Some(instance_name) = extract_name_from_span(&group_str) {
-                                    let diags = get_instance_events_diagnostics(
+                                    diagnostics.extend(get_instance_events_diagnostics(
                                         &instance_name,
                                         api_manager,
-                                    );
-                                    diagnostics.extend(diags);
-
-                                    break;
+                                    ));
+                                }
+                            }
+                        } else if let Some(rel_pos) = bracket_content.find(&change_needle) {
+                            // Support Change event
+                            let dot_offset = rel_pos + change_needle.len() - 1;
+                            if cursor_in_bracket >= dot_offset {
+                                if let Some(instance_name) = extract_name_from_span(&group_str) {
+                                    diagnostics.extend(get_instance_property_diagnostics(
+                                        &instance_name,
+                                        api_manager,
+                                    ));
                                 }
                             }
                         }
 
-                        if let Some(instance_name) = extract_name_from_span(&group_str) {
-                            let diags =
-                                get_instance_events_diagnostics(&instance_name, api_manager);
-                            diagnostics.extend(diags);
+                        handled = true;
+                        break;
+                    }
 
-                            break;
-                        }
+                    search_from = bracket_end + 1;
+                    if search_from >= brace_content.len() {
+                        break;
                     }
                 }
 
-                if !context_is_assignment(doc, cursor_byte_offset) {
+                // Cursor is in props table but not inside any bracket
+                if !handled && !context_is_assignment(doc, cursor_byte_offset) {
                     if let Some(instance_name) = extract_name_from_span(&group_str) {
-                        let diags = get_instance_property_diagnostics(&instance_name, api_manager);
-                        diagnostics.extend(diags);
+                        diagnostics.extend(get_instance_property_diagnostics(
+                            &instance_name,
+                            api_manager,
+                        ));
                     }
                 }
 
@@ -373,12 +390,11 @@ fn get_completion_items(
             }
         }
 
+        // Cursor is in the first argument (the instance name string)
         if let Some((curr_context, _start, _end)) =
             is_cursor_in_context(local_cursor_offset, &group_str, &FIND_QUOTES)
         {
-            let diags = get_instance_names(curr_context.as_ref(), api_manager);
-            diagnostics.extend(diags);
-
+            diagnostics.extend(get_instance_names(curr_context.as_ref(), api_manager));
             break;
         }
     }
