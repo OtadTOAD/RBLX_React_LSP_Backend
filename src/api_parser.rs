@@ -233,8 +233,8 @@ pub async fn download_api() -> Result<String, reqwest::Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::api_parser::{download_api, parse_api_dump};
-    use std::{env, fs, io::Write};
+    use crate::api_parser::{cache_file, download_api, parse_api_dump};
+    use std::{env, fs, io::Write, path::Path};
 
     fn temp_dir() -> std::path::PathBuf {
         let dir = env::temp_dir().join("rblx_react_lsp_tests");
@@ -270,6 +270,27 @@ mod tests {
         fs::write(&cache_path, encoded)?;
 
         fs::remove_file(&cache_path).ok();
+        Ok(())
+    }
+
+    // Just easy method to download/generate bundle cache manually without having other tests use perm files
+    #[tokio::test]
+    #[ignore]
+    async fn test_generate_bundled_cache() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let out_dir = Path::new("bundled").to_path_buf();
+        fs::create_dir_all(&out_dir)?;
+
+        println!("Downloading API dump...");
+        let download_result = download_api().await?;
+        let parsed_instances = parse_api_dump(&download_result)?;
+        cache_file(&parsed_instances)?;
+
+        let encoded = bincode::serialize(&parsed_instances)?;
+        let out_path = out_dir.join("serialized_api.bin");
+        fs::write(&out_path, &encoded)?;
+
+        println!("Bundled cache written to: {}", out_path.display());
+        println!("Instance count: {}", parsed_instances.len());
         Ok(())
     }
 }
