@@ -219,16 +219,43 @@ pub fn parse_api_dump(api_dump: &str) -> Result<ParsedInstances, serde_json::Err
     Ok(process_api_dump_json(&api_dump_json))
 }
 
-pub async fn download_api() -> Result<String, reqwest::Error> {
-    let req_version_url = "https://setup.rbxcdn.com/versionQTStudio";
-    let version_result = reqwest::get(req_version_url).await?.text().await?;
+pub async fn download_api() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    match download_api_from_clientsettings().await {
+        Ok(dump) => return Ok(dump),
+        Err(e) => eprintln!(
+            "Primary API source failed ({}), falling back to QTStudio...",
+            e
+        ),
+    }
+
+    // Fallback incase client settings one fails for some reason
+    download_api_from_qt().await
+}
+
+async fn download_api_from_clientsettings(
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let version_url = "https://clientsettingscdn.roblox.com/v1/client-version/WindowsStudio64";
+    let version_json: serde_json::Value = reqwest::get(version_url).await?.json().await?;
+
+    let version = version_json["clientVersionUpload"]
+        .as_str()
+        .ok_or("Failed to parse clientVersionUpload from response")?;
+
+    let api_dump_url = format!("https://setup.rbxcdn.com/{}-API-Dump.json", version);
+    Ok(reqwest::get(&api_dump_url).await?.text().await?)
+}
+
+async fn download_api_from_qt() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let version_result = reqwest::get("https://setup.rbxcdn.com/versionQTStudio")
+        .await?
+        .text()
+        .await?;
 
     let api_dump_url = format!(
         "https://setup.rbxcdn.com/{}-API-Dump.json",
         version_result.trim()
     );
-    let api_dump_data = reqwest::get(&api_dump_url).await?.text().await?;
-    Ok(api_dump_data)
+    Ok(reqwest::get(&api_dump_url).await?.text().await?)
 }
 
 #[cfg(test)]
@@ -243,7 +270,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_downloading_api() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_downloading_api() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let dump_path = temp_dir().join("api_dump.json");
 
         let download_result = download_api().await?;
@@ -256,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_processing_with_cache() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_processing_with_cache() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let download_result = download_api().await?;
         let parsed_instances = parse_api_dump(&download_result)?;
 
