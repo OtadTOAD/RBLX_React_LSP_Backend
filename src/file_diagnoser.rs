@@ -169,7 +169,14 @@ fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
     let bytes = doc.as_bytes();
     for i in (0..cursor_byte_offset).rev() {
         match bytes[i] {
-            b'=' => return true,
+            b'=' => {
+                let prev_is_eq = i > 0 && bytes[i - 1] == b'=';
+                let next_is_eq = i + 1 < bytes.len() && bytes[i + 1] == b'=';
+                if prev_is_eq || next_is_eq {
+                    continue;
+                }
+                return true;
+            }
             b'\n' => return false,
             b',' => return false,
             b';' => return false,
