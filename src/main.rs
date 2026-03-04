@@ -12,15 +12,18 @@ use tower_lsp::{
     lsp_types::{
         CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
         DidCloseTextDocumentParams, DidOpenTextDocumentParams, ExecuteCommandOptions,
-        ExecuteCommandParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-        ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+        ExecuteCommandParams, InitializeParams, InitializeResult, InitializedParams,
+        MessageActionItem, MessageType, ServerCapabilities, TextDocumentSyncCapability,
+        TextDocumentSyncKind,
     },
     Client, LanguageServer, LspService, Server,
 };
 
 use crate::{
-    api_manager::ApiManager, api_parser::create_api_file_readable,
-    file_diagnoser::generate_auto_completions, file_manager::FileManager,
+    api_manager::ApiManager,
+    api_parser::{create_api_file_readable, get_live_version},
+    file_diagnoser::generate_auto_completions,
+    file_manager::FileManager,
 };
 
 #[derive(Debug)]
@@ -35,42 +38,17 @@ impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                semantic_tokens_provider: None,
-                hover_provider: None,
-                signature_help_provider: None,
-                selection_range_provider: None,
-                definition_provider: None,
-                type_definition_provider: None,
-                implementation_provider: None,
-                references_provider: None,
-                document_highlight_provider: None,
-                document_symbol_provider: None,
-                workspace_symbol_provider: None,
-                code_action_provider: None,
-                code_lens_provider: None,
-                document_formatting_provider: None,
-                document_range_formatting_provider: None,
-                document_on_type_formatting_provider: None,
-                rename_provider: None,
-                document_link_provider: None,
-                color_provider: None,
-                folding_range_provider: None,
-                declaration_provider: None,
-                workspace: None,
-                call_hierarchy_provider: None,
-                moniker_provider: None,
-                linked_editing_range_provider: None,
-                experimental: None,
-
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["rblx-react-lsp.genMetadata".to_string()],
+                    commands: vec![
+                        "rblx-react-lsp.genMetadata".to_string(),
+                        "rblx-react-lsp.readCache".to_string(),
+                    ],
                     work_done_progress_options: Default::default(),
                 }),
                 completion_provider: Some(CompletionOptions {
-                    //resolve_provider: Some(true),
                     trigger_characters: Some(vec![
                         "\"".to_string(),
                         ".".to_string(),
@@ -80,25 +58,94 @@ impl LanguageServer for Backend {
                     ]),
                     ..Default::default()
                 }),
+                ..Default::default()
             },
             server_info: None,
         })
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let api_manager = self.api_manager.clone(); // Clones Arc, not the actual manager
-        let client = self.client.clone(); // Clones internal client handle
+        let api_manager = self.api_manager.clone();
+        let api_manager_for_update = self.api_manager.clone();
+        let client = self.client.clone();
+        let client_for_update = self.client.clone();
 
         tokio::spawn(async move {
             let mut api_manager = api_manager.lock().await;
-            if let Err(e) = api_manager.load_api().await {
-                let _ = client
-                    .log_message(MessageType::ERROR, format!("Failed to load API: {}", e))
-                    .await;
-            } else {
-                let _ = client
-                    .log_message(MessageType::INFO, "API loaded in background.")
-                    .await;
+            match api_manager.load_api().await {
+                Ok(cached_version) => {
+                    client
+                        .log_message(MessageType::INFO, "API loaded from cache.")
+                        .await;
+
+                    // Check for updates in the background without blocking completions
+                    tokio::spawn(async move {
+                        match get_live_version().await {
+                            Ok(live_version) if live_version != cached_version => {
+                                let response = client_for_update
+                                    .show_message_request(
+                                        MessageType::INFO,
+                                        "Roblox API update available. Update now?",
+                                        Some(vec![
+                                            MessageActionItem {
+                                                title: "Yes".to_string(),
+                                                properties: Default::default(),
+                                            },
+                                            MessageActionItem {
+                                                title: "No".to_string(),
+                                                properties: Default::default(),
+                                            },
+                                        ]),
+                                    )
+                                    .await;
+
+                                if let Ok(Some(action)) = response {
+                                    if action.title == "Yes" {
+                                        client_for_update
+                                            .show_message(
+                                                MessageType::INFO,
+                                                "Downloading Roblox API update...",
+                                            )
+                                            .await;
+
+                                        let mut mgr = api_manager_for_update.lock().await;
+                                        match mgr.download_api().await {
+                                            Ok(_) => {
+                                                client_for_update
+                                                    .show_message(
+                                                        MessageType::INFO,
+                                                        "Roblox API updated successfully",
+                                                    )
+                                                    .await;
+                                            }
+                                            Err(e) => {
+                                                client_for_update
+                                                    .show_message(
+                                                        MessageType::ERROR,
+                                                        format!("Failed to update API: {}", e),
+                                                    )
+                                                    .await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(_) => {}  // Already up to date, do nothing
+                            Err(_) => {} // Version check failed silently, not critical
+                        }
+                    });
+                }
+                Err(e) => {
+                    client
+                        .show_message(
+                            MessageType::WARNING,
+                            format!(
+                                "No API cache found, run 'RBLX React: Generate and Cache API Metadata' to enable completions. ({})",
+                                e
+                            ),
+                        )
+                        .await;
+                }
             }
         });
 

@@ -1,4 +1,6 @@
-use crate::api_parser::{cache_file, download_api, get_cache, parse_api_dump, ParsedInstance};
+use crate::api_parser::{
+    cache_file, download_api_with_version, get_cache, parse_api_dump, ParsedInstance,
+};
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -19,30 +21,29 @@ impl ApiManager {
 
     // This downloads and caches new api file, which then gets loaded
     pub async fn download_api(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let download_result = download_api().await?;
-        let parsed_instances = parse_api_dump(&download_result)?;
+        let (dump, version) = download_api_with_version().await?;
+        let parsed_instances = parse_api_dump(&dump)?;
 
-        cache_file(&parsed_instances)?;
+        cache_file(&parsed_instances, &version)?;
         self.names = Some(parsed_instances.keys().cloned().collect());
         self.instances = Some(parsed_instances);
 
         Ok(())
     }
 
-    // This loads api from cached file
-    pub async fn load_api(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let cache_result = get_cache()?;
-        if cache_result.is_none() {
-            return Err("Failed to load api from cache!".into());
-        }
+    // This loads api from cached file, returns the cached version string so the
+    // caller can compare it against the live version and prompt for updates if needed
+    pub async fn load_api(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let cache = get_cache()?.ok_or("Failed to load api from cache!")?;
 
-        self.instances = cache_result;
+        let version = cache.version.clone();
+        self.instances = Some(cache.instances);
         self.names = self
             .instances
             .as_ref()
             .map(|map| map.keys().cloned().collect());
 
-        Ok(())
+        Ok(version)
     }
 
     fn build_word_freq(doc: &str) -> HashMap<String, usize> {

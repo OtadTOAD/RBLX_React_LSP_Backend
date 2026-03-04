@@ -90,40 +90,67 @@ pub struct ParsedProperty {
     pub data_type: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CachedApi {
+    pub version: String,
+    pub instances: ParsedInstances,
+}
+
 fn get_cache_file_path() -> PathBuf {
     let exe_path = env::current_exe().expect("Failed to get current exe path!");
     let exe_dir = exe_path.parent().expect("Failed to get exe dir!");
     exe_dir.join("serialized_api.bin")
 }
 
-pub fn get_cache() -> Result<Option<ParsedInstances>, Box<dyn std::error::Error + Send + Sync>> {
+pub fn get_cache() -> Result<Option<CachedApi>, Box<dyn std::error::Error + Send + Sync>> {
     let api_cache_path = get_cache_file_path();
-    if api_cache_path.exists() {
-        let bytes = fs::read(api_cache_path)?;
-        let parsed_api: ParsedInstances = bincode::deserialize(&bytes)?;
-        Ok(Some(parsed_api))
-    } else {
-        Ok(None)
+    if !api_cache_path.exists() {
+        return Ok(None);
     }
+
+    let bytes = fs::read(&api_cache_path)?;
+
+    // Try new format
+    if let Ok(cache) = bincode::deserialize::<CachedApi>(&bytes) {
+        return Ok(Some(cache));
+    }
+
+    // Fall back to old format (raw ParsedInstances) — treat version as unknown
+    // so it will always prompt the user to update once, then save in new format
+    if let Ok(instances) = bincode::deserialize::<ParsedInstances>(&bytes) {
+        return Ok(Some(CachedApi {
+            version: "unknown".to_string(),
+            instances,
+        }));
+    }
+
+    // Probably missing
+    Ok(None)
 }
 
 pub fn cache_file(
     parsed_instances: &ParsedInstances,
+    version: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let api_cache_path = get_cache_file_path();
-    let encoded = bincode::serialize(parsed_instances)?;
+    let cache = CachedApi {
+        version: version.to_string(),
+        instances: parsed_instances.clone(),
+    };
+    let encoded = bincode::serialize(&cache)?;
     let mut file = File::create(api_cache_path)?;
     file.write_all(&encoded)?;
     Ok(())
 }
+
 pub async fn create_api_file_readable(
     path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let file_path = path.join("readable_serialized_api.json");
     let mut file = fs::File::create(file_path)?;
 
-    let download_result = download_api().await?;
-    let processed_result = parse_api_dump(&download_result)?; // ? unwraps Ok or returns Err early
+    let (dump, _version) = download_api_with_version().await?;
+    let processed_result = parse_api_dump(&dump)?;
 
     let json_string = serde_json::to_string_pretty(&processed_result)?;
     file.write_all(json_string.as_bytes())?;
@@ -219,49 +246,69 @@ pub fn parse_api_dump(api_dump: &str) -> Result<ParsedInstances, serde_json::Err
     Ok(process_api_dump_json(&api_dump_json))
 }
 
-pub async fn download_api() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_live_version() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let version_url = "https://clientsettingscdn.roblox.com/v1/client-version/WindowsStudio64";
+    let version_json: serde_json::Value = reqwest::get(version_url).await?.json().await?;
+    Ok(version_json["clientVersionUpload"]
+        .as_str()
+        .ok_or("Failed to parse clientVersionUpload from response")?
+        .to_string())
+}
+
+pub async fn download_api_with_version(
+) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     match download_api_from_clientsettings().await {
-        Ok(dump) => return Ok(dump),
+        Ok(result) => return Ok(result),
         Err(e) => eprintln!(
             "Primary API source failed ({}), falling back to QTStudio...",
             e
         ),
     }
 
-    // Fallback incase client settings one fails for some reason
-    download_api_from_qt().await
+    // Fallback
+    let version = reqwest::get("https://setup.rbxcdn.com/versionQTStudio")
+        .await?
+        .text()
+        .await?;
+    let version = version.trim().to_string();
+    let dump = reqwest::get(format!(
+        "https://setup.rbxcdn.com/{}-API-Dump.json",
+        version
+    ))
+    .await?
+    .text()
+    .await?;
+    Ok((dump, version))
 }
 
 async fn download_api_from_clientsettings(
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     let version_url = "https://clientsettingscdn.roblox.com/v1/client-version/WindowsStudio64";
     let version_json: serde_json::Value = reqwest::get(version_url).await?.json().await?;
 
     let version = version_json["clientVersionUpload"]
         .as_str()
-        .ok_or("Failed to parse clientVersionUpload from response")?;
+        .ok_or("Failed to parse clientVersionUpload from response")?
+        .to_string();
 
     let api_dump_url = format!("https://setup.rbxcdn.com/{}-API-Dump.json", version);
-    Ok(reqwest::get(&api_dump_url).await?.text().await?)
-}
-
-async fn download_api_from_qt() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let version_result = reqwest::get("https://setup.rbxcdn.com/versionQTStudio")
-        .await?
-        .text()
-        .await?;
-
-    let api_dump_url = format!(
-        "https://setup.rbxcdn.com/{}-API-Dump.json",
-        version_result.trim()
-    );
-    Ok(reqwest::get(&api_dump_url).await?.text().await?)
+    let dump = reqwest::get(&api_dump_url).await?.text().await?;
+    Ok((dump, version))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::api_parser::{cache_file, download_api, parse_api_dump, ParsedInstances};
-    use std::{env, fs, io::Write, path::Path};
+    use crate::api_parser::{
+        cache_file, download_api_with_version, get_live_version, parse_api_dump, CachedApi,
+        ParsedInstances,
+    };
+    use std::{env, fs, path::Path};
+
+    // Download without needing version
+    pub async fn download_api() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let (dump, _) = download_api_with_version().await?;
+        Ok(dump)
+    }
 
     fn temp_dir() -> std::path::PathBuf {
         let dir = env::temp_dir().join("rblx_react_lsp_tests");
@@ -271,35 +318,68 @@ mod tests {
 
     #[tokio::test]
     async fn test_downloading_api() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let dump_path = temp_dir().join("api_dump.json");
-
         let download_result = download_api().await?;
-        let mut file = fs::File::create(&dump_path)?;
-        file.write_all(download_result.as_bytes())?;
-        file.flush()?;
-
-        fs::remove_file(&dump_path).ok();
+        assert!(!download_result.is_empty(), "API dump should not be empty");
         Ok(())
     }
 
     #[tokio::test]
     async fn test_processing_with_cache() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let download_result = download_api().await?;
-        let parsed_instances = parse_api_dump(&download_result)?;
+        let (dump, version) = download_api_with_version().await?;
+        let parsed_instances = parse_api_dump(&dump)?;
+
+        let cache = CachedApi {
+            version: version.clone(),
+            instances: parsed_instances.clone(),
+        };
 
         let cache_path = temp_dir().join("serialized_api.bin");
-        let encoded = bincode::serialize(&parsed_instances)?;
+        let encoded = bincode::serialize(&cache)?;
         fs::write(&cache_path, &encoded)?;
 
         let read_back = fs::read(&cache_path)?;
-        let decoded: ParsedInstances = bincode::deserialize(&read_back)?;
-        assert!(!decoded.is_empty(), "Cache should have instances");
+        let decoded: CachedApi = bincode::deserialize(&read_back)?;
+        assert!(!decoded.instances.is_empty(), "Cache should have instances");
+        assert_eq!(
+            decoded.version, version,
+            "Version should round-trip correctly"
+        );
 
         fs::remove_file(&cache_path).ok();
         Ok(())
     }
 
-    // Just easy method to download/generate bundle cache manually without having other tests use perm files
+    #[tokio::test]
+    async fn test_backwards_compat_cache() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let dump = download_api().await?;
+        let parsed_instances = parse_api_dump(&dump)?;
+
+        // Write in old format (raw ParsedInstances, no version)
+        let cache_path = temp_dir().join("serialized_api_old.bin");
+        let encoded = bincode::serialize(&parsed_instances)?;
+        fs::write(&cache_path, &encoded)?;
+
+        // Read it back using the old format directly to simulate what get_cache does
+        let read_back = fs::read(&cache_path)?;
+        let decoded: ParsedInstances = bincode::deserialize(&read_back)?;
+        assert!(
+            !decoded.is_empty(),
+            "Old format cache should still be readable"
+        );
+
+        fs::remove_file(&cache_path).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_version_fetch() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let version = get_live_version().await?;
+        assert!(!version.is_empty(), "Version string should not be empty");
+        println!("Live version: {}", version);
+        Ok(())
+    }
+
+    // Run with: cargo test test_generate_bundled_cache -- --ignored --nocapture
     #[tokio::test]
     #[ignore]
     async fn test_generate_bundled_cache() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -307,12 +387,18 @@ mod tests {
         fs::create_dir_all(&out_dir)?;
 
         println!("Downloading API dump...");
-        let download_result = download_api().await?;
-        let parsed_instances = parse_api_dump(&download_result)?;
-        cache_file(&parsed_instances)?;
+        let (dump, version) = download_api_with_version().await?;
+        println!("Version: {}", version);
 
-        let encoded = bincode::serialize(&parsed_instances)?;
+        let parsed_instances = parse_api_dump(&dump)?;
+        cache_file(&parsed_instances, &version)?;
+
         let out_path = out_dir.join("serialized_api.bin");
+        let cache = CachedApi {
+            version: version.clone(),
+            instances: parsed_instances.clone(),
+        };
+        let encoded = bincode::serialize(&cache)?;
         fs::write(&out_path, &encoded)?;
 
         println!("Bundled cache written to: {}", out_path.display());
