@@ -15,6 +15,8 @@ lazy_static! {
         r#"(?i)\b(?:local\s+)?(\w+)\s*=\s*(\w+)\.createElement\b"#
     ).unwrap();
     static ref FIRST_QUOTES_PATTERN: Regex = Regex::new(r#""(.+)""#).unwrap();
+
+    static ref FIND_QUOTES: Regex = Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#).unwrap();
 }
 
 fn has_react(doc: &str) -> bool {
@@ -197,7 +199,7 @@ fn is_cursor_in_context(
     None
 }
 
-fn find_mattching_paren(doc: &str, start: usize) -> usize {
+fn find_matching_paren(doc: &str, start: usize) -> usize {
     let mut depth = 1;
     for (offset, ch) in doc[start..].char_indices() {
         match ch {
@@ -253,7 +255,7 @@ fn extract_create_element_groups(doc: &str, var_name: &str) -> Vec<(usize, usize
     let mut groups = Vec::new();
 
     for start in doc.match_indices(&needle).map(|(i, _)| i + needle.len()) {
-        let end = find_mattching_paren(doc, start);
+        let end = find_matching_paren(doc, start);
         groups.push((start, end, doc[start..end].to_string()));
     }
 
@@ -278,7 +280,7 @@ fn extract_all_create_element_groups(
         // For macros, we look for macro_name( instead of macro_name.createElement(
         let needle = format!("{macro_name}(");
         for start in doc.match_indices(&needle).map(|(i, _)| i + needle.len()) {
-            let end = find_mattching_paren(doc, start);
+            let end = find_matching_paren(doc, start);
             all_groups.push((start, end, doc[start..end].to_string()));
         }
     }
@@ -364,10 +366,8 @@ fn get_completion_items(
             }
         }
 
-        let quotes_re =
-            Regex::new(r#"(?s)(?:"([^"]*?)"|'([^']*?)'|`([^`]*?)`|\[\[([^\]]*?)\]\])"#).unwrap();
         if let Some((curr_context, _start, _end)) =
-            is_cursor_in_context(local_cursor_offset, &group_str, &quotes_re)
+            is_cursor_in_context(local_cursor_offset, &group_str, &FIND_QUOTES)
         {
             let diags = get_instance_names(curr_context.as_ref(), api_manager);
             diagnostics.extend(diags);
@@ -394,7 +394,7 @@ pub fn generate_auto_completions(
 #[cfg(test)]
 mod tests {
     use crate::file_diagnoser::{
-        extract_name_from_span, find_matching_brace, find_matching_bracket, find_mattching_paren,
+        extract_name_from_span, find_matching_brace, find_matching_bracket, find_matching_paren,
         get_create_element_macros, get_react_var_name,
     };
 
@@ -452,19 +452,19 @@ mod tests {
     #[test]
     fn test_find_matching_paren() {
         let text = "(simple)";
-        assert_eq!(find_mattching_paren(text, 1), 7);
+        assert_eq!(find_matching_paren(text, 1), 7);
 
         let text = "(nested (inner))";
-        assert_eq!(find_mattching_paren(text, 1), 15);
+        assert_eq!(find_matching_paren(text, 1), 15);
 
         let text = "(a (b (c)))";
-        assert_eq!(find_mattching_paren(text, 1), 10);
+        assert_eq!(find_matching_paren(text, 1), 10);
 
         let text = "(multiple (args), (more))";
-        assert_eq!(find_mattching_paren(text, 1), 24);
+        assert_eq!(find_matching_paren(text, 1), 24);
 
         let text = "(unclosed";
-        assert_eq!(find_mattching_paren(text, 1), text.len());
+        assert_eq!(find_matching_paren(text, 1), text.len());
     }
 
     #[test]
