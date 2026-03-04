@@ -233,7 +233,7 @@ pub async fn download_api() -> Result<String, reqwest::Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::api_parser::{cache_file, download_api, parse_api_dump};
+    use crate::api_parser::{cache_file, download_api, parse_api_dump, ParsedInstances};
     use std::{env, fs, io::Write, path::Path};
 
     fn temp_dir() -> std::path::PathBuf {
@@ -257,17 +257,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_processing_with_cache() -> Result<(), Box<dyn std::error::Error>> {
-        let dump_path = temp_dir().join("api_dump.json");
-        if !dump_path.exists() {
-            return Err("Run test_downloading_api first to generate api_dump.json".into());
-        }
-
-        let api_dump_cache_content = fs::read_to_string(&dump_path)?;
-        let parsed_instances = parse_api_dump(&api_dump_cache_content)?;
+        let download_result = download_api().await?;
+        let parsed_instances = parse_api_dump(&download_result)?;
 
         let cache_path = temp_dir().join("serialized_api.bin");
         let encoded = bincode::serialize(&parsed_instances)?;
-        fs::write(&cache_path, encoded)?;
+        fs::write(&cache_path, &encoded)?;
+
+        let read_back = fs::read(&cache_path)?;
+        let decoded: ParsedInstances = bincode::deserialize(&read_back)?;
+        assert!(!decoded.is_empty(), "Cache should have instances");
 
         fs::remove_file(&cache_path).ok();
         Ok(())
