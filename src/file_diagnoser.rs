@@ -170,9 +170,9 @@ fn context_is_assignment(doc: &str, cursor_byte_offset: usize) -> bool {
     for i in (0..cursor_byte_offset).rev() {
         match bytes[i] {
             b'=' => {
-                let prev_is_eq = i > 0 && bytes[i - 1] == b'=';
-                let next_is_eq = i + 1 < bytes.len() && bytes[i + 1] == b'=';
-                if prev_is_eq || next_is_eq {
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                let next = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+                if prev == b'=' || next == b'=' || prev == b'~' || prev == b'>' || prev == b'<' {
                     continue;
                 }
                 return true;
