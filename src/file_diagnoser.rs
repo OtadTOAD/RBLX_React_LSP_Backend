@@ -88,7 +88,7 @@ fn get_instance_property_diagnostics(
                 label: name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(data_type.clone()),
-                sort_text: Some(format!("A_OTAD: {:05}", i)),
+                sort_text: Some(format!("\x01{:05}", i)),
 
                 ..Default::default()
             });
@@ -110,7 +110,7 @@ fn get_instance_events_diagnostics(
                 label: name.clone(),
                 kind: Some(CompletionItemKind::FIELD),
                 detail: Some(data_type.clone()),
-                sort_text: Some(format!("A_OTAD: {:05}", i)),
+                sort_text: Some(format!("\x01{:05}", i)),
 
                 ..Default::default()
             });
@@ -128,7 +128,7 @@ fn get_instance_names(instance_name: &str, api_manager: &ApiManager) -> Vec<Comp
             diagnostics.push(CompletionItem {
                 label: property.clone(),
                 kind: Some(CompletionItemKind::CLASS),
-                sort_text: Some(format!("OTAD: {:05}", i)),
+                sort_text: Some(format!("\x01{:05}", i)),
 
                 ..Default::default()
             });
